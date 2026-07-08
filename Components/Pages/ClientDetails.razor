@@ -1,0 +1,1290 @@
+﻿@page "/client-details/{WearableDeviceId:int}"
+@rendermode InteractiveServer
+
+@using FallDetectionMonitor.Data
+@using FallDetectionMonitor.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@using FallDetectionMonitor.Services
+
+@inject IDbContextFactory<FallDetectionDbContext> DbFactory
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject MqttCommandPublisher CommandPublisher
+
+<div class="client-details-page">
+    <header class="details-header">
+        <h1>Client Details Page</h1>
+        <p>Smart Fall Detection Remote Monitoring</p>
+    </header>
+
+    <main class="details-main">
+        <div class="back-row">
+            <button @onclick="BackToDashboard">← Back to Dashboard</button>
+        </div>
+
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <div class="error-box">
+                <strong>Error:</strong> @errorMessage
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(actionMessage))
+        {
+            <div class="info-box">
+                @actionMessage
+            </div>
+        }
+
+        @if (isLoading)
+        {
+            <div class="info-box">
+                Loading client details...
+            </div>
+        }
+        else if (client == null)
+        {
+            <div class="error-box">
+                Client not found.
+            </div>
+        }
+        else
+        {
+            @if (showEditForm)
+            {
+                <div class="edit-form-overlay">
+                    <section class="edit-form-card">
+                        <h2>Edit Client</h2>
+
+                        <label>Name</label>
+                        <input @bind="editForm.FullName" />
+
+                        <label>Age</label>
+                        <input type="number" @bind="editForm.Age" />
+
+                        <h3 class="form-section-title">Location</h3>
+
+                        <label>Street Name and Number <span class="required-star">*</span></label>
+                        <input @bind="editForm.StreetNameAndNumber" />
+
+                        <label>Block Number <span class="required-star">*</span></label>
+                        <input @bind="editForm.BlockNumber" />
+
+                        <label>Postal Code <span class="required-star">*</span></label>
+                        <input @bind="editForm.PostalCode" />
+
+                        <label>Unit Number <span class="optional-text">(Optional)</span></label>
+                        <input @bind="editForm.UnitNumber" />
+
+                        <label>Medical History</label>
+                        <textarea @bind="editForm.MedicalHistory"></textarea>
+
+                        <div class="checkbox-row">
+                            <input id="noKinCheckbox" type="checkbox" @bind="editForm.HasNoNextOfKin" />
+                            <label for="noKinCheckbox">No next-of-kin recorded</label>
+                        </div>
+
+                        @if (!editForm.HasNoNextOfKin)
+                        {
+                            <label>Next-of-Kin Name</label>
+                            <input @bind="editForm.EmergencyContactName" />
+
+                            <label>Next-of-Kin Number</label>
+                            <input @bind="editForm.EmergencyContactPhone" />
+                        }
+
+                        <div class="details-actions">
+                            <button @onclick="SaveEdit">Save Changes</button>
+                            <button class="secondary-btn" @onclick="CancelEdit">Cancel</button>
+                        </div>
+                    </section>
+                </div>
+            }
+
+            <section class="detail-card @(client.FallDetected ? "detail-danger" : "detail-normal")">
+                <h2>@client.Name</h2>
+
+                <div class="detail-grid">
+                    <div class="detail-item">
+                        <strong>Age</strong>
+                        <p>@client.Age</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Location</strong>
+                        <p>@client.Location</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Status</strong>
+                        <p class="@(client.FallDetected ? "status-danger" : "status-safe")">
+                            @(client.FallDetected ? "Fall Detected" : "Safe")
+                        </p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Fall Detected Time</strong>
+                        <p>@client.FallDetectedAtText</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Medical History</strong>
+                        <p>@client.MedicalHistory</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>LED Status</strong>
+                        <p>@(client.LedActive ? "ON" : "OFF")</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Buzzer Status</strong>
+                        <p>@(client.BuzzerActive ? "ON" : "OFF")</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Next-of-Kin</strong>
+                        <p>@client.NextOfKinNameText</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Next-of-Kin Number</strong>
+                        <p>@client.NextOfKinNumberText</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Emergency Services Called</strong>
+                        <p>@client.EmergencyServicesCalledAtText</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Next-of-Kin Called</strong>
+                        <p>@client.NextOfKinCalledAtText</p>
+                    </div>
+
+                    <div class="detail-item action-taken-box">
+                        <strong>Emergency Action Taken</strong>
+                        <p>@client.ActionTakenText</p>
+                    </div>
+
+                    <div class="detail-item">
+                        <strong>Device Code</strong>
+                        <p>@client.DeviceCode</p>
+                    </div>
+                </div>
+
+                <div class="details-actions">
+                    <button class="call-btn" @onclick="CallEmergencyServices">
+                        Call Emergency Services
+                    </button>
+
+                    @if (client.HasNextOfKin && !string.IsNullOrWhiteSpace(client.NextOfKinNumber))
+                    {
+                        <button class="call-btn" @onclick="CallNextOfKin">
+                            Call Next-of-Kin
+                        </button>
+                    }
+
+                    <button class="reset-btn" @onclick="ResetSelected">
+                        Reset
+                    </button>
+
+                    <button class="demo-btn" @onclick="OpenSensorGraph">
+                        Graph Data
+                    </button>
+
+                    <button class="edit-btn" @onclick="OpenEditForm">
+                        Edit
+                    </button>
+
+                    <button class="delete-btn" @onclick="DeleteClient">
+                        Delete
+                    </button>
+
+                    <button class="demo-btn" @onclick="SimulateFall">
+                        Simulate Fall
+                    </button>
+                </div>
+            </section>
+            <section class="fall-history-card">
+                <h2>Fall History</h2>
+                <p class="section-subtitle">
+                    Shows previous fall records, last updated time, action taken, and action date/time.
+                </p>
+
+                @if (fallHistory.Count == 0)
+                {
+                    <div class="empty-history">
+                        No fall history recorded yet.
+                    </div>
+                }
+                else
+                {
+                    <div class="fall-history-scroll">
+                        <table class="fall-history-table">
+                            <thead>
+                                <tr>
+                                    <th>Fall Detected Date & Time</th>
+                                    <th>Last Updated Date & Time</th>
+                                    <th>Action Taken</th>
+                                    <th>Action Date & Time</th>
+                                    <th>Reason</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                @foreach (var item in fallHistory)
+                                {
+                                    <tr>
+                                        <td>@item.FallDetectedAtText</td>
+                                        <td>@item.LastUpdatedAtText</td>
+                                        <td>@item.ActionTakenText</td>
+                                        <td>@item.ActionTakenAtText</td>
+                                        <td>@item.ResetReasonText</td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </section>
+            <section class="fall-count-card">
+                <div class="fall-count-header">
+                    <div>
+                        <h2>Fall Count</h2>
+                        <p class="section-subtitle">
+                            Shows how many times this client fell within the selected period.
+                        </p>
+                    </div>
+
+                    <select value="@selectedFallCountRange" @onchange="OnFallCountRangeChanged">
+                        <option value="days">Past 7 Days</option>
+                        <option value="weeks">Past 4 Weeks</option>
+                        <option value="months">Past 12 Months</option>
+                        <option value="years">Past 5 Years</option>
+                    </select>
+                </div>
+
+                @if (fallCountBars.Count == 0)
+                {
+                    <div class="empty-history">
+                        No fall count data available.
+                    </div>
+                }
+                else
+                {
+                    <div class="bar-chart">
+                        @foreach (var bar in fallCountBars)
+                        {
+                            <div class="bar-row">
+                                <div class="bar-label">@bar.Label</div>
+
+                                <div class="bar-track">
+                                    @if (bar.Count > 0)
+                                    {
+                                        <div class="bar-fill" style="width:@bar.WidthPercent%"></div>
+                                    }
+                                </div>
+
+                                <div class="bar-value">@bar.Count</div>
+                            </div>
+                        }
+                    </div>
+                }
+            </section>
+        }
+    </main>
+</div>
+
+@code {
+    [Parameter]
+    public int WearableDeviceId { get; set; }
+
+    private ClientDetail? client;
+    private bool isLoading = true;
+    private bool showEditForm = false;
+
+    private string errorMessage = "";
+    private string actionMessage = "";
+    private string lastMessageKey = "";
+
+    private EditClientForm editForm = new();
+    private List<FallHistoryRow> fallHistory = new();
+    private string selectedFallCountRange = "days";
+    private List<FallCountBar> fallCountBars = new();
+
+    private static readonly Random random = new Random();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadClient();
+    }
+
+    private async Task LoadClient()
+    {
+        isLoading = true;
+        errorMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var device = await db.WearableDevices
+                .Include(d => d.Patient)
+                .FirstOrDefaultAsync(d => d.Id == WearableDeviceId);
+
+            if (device == null || device.Patient == null)
+            {
+                client = null;
+                return;
+            }
+
+            var latestReading = await db.SensorReadings
+                .Where(r => r.WearableDeviceId == WearableDeviceId)
+                .OrderByDescending(r => r.RecordedAt)
+                .FirstOrDefaultAsync();
+
+            var activeFallAlert = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == WearableDeviceId &&
+                            a.IsResolved == false &&
+                            a.AlertType == "Fall Detected")
+                .OrderByDescending(a => a.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            var lastFallAlert = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == WearableDeviceId &&
+                            a.AlertType == "Fall Detected")
+                .OrderByDescending(a => a.CreatedAt)
+                .FirstOrDefaultAsync();
+
+            var latestFallReading = await db.SensorReadings
+                .Where(r => r.WearableDeviceId == WearableDeviceId && r.FallDetected)
+                .OrderByDescending(r => r.RecordedAt)
+                .FirstOrDefaultAsync();
+
+            var fallAlerts = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == WearableDeviceId &&
+                            a.AlertType == "Fall Detected")
+                .OrderByDescending(a => a.CreatedAt)
+                .ToListAsync();
+
+            fallHistory = fallAlerts
+                 .Select(a => new FallHistoryRow
+                 {
+                     FallDetectedAt = a.CreatedAt,
+                     LastUpdatedAt = a.ResolvedAt
+                         ?? a.EmergencyServicesCalledAt
+                         ?? a.NextOfKinCalledAt
+                         ?? a.CreatedAt,
+                     EmergencyServicesCalledAt = a.EmergencyServicesCalledAt,
+                     NextOfKinCalledAt = a.NextOfKinCalledAt,
+                     ResolvedAt = a.ResolvedAt,
+                     ResolutionType = a.ResolutionType,
+                     ResetReason = a.ResetReason
+                 })
+                  .ToList();
+
+            BuildFallCountChart();
+
+            bool fallDetected = activeFallAlert != null || latestReading?.FallDetected == true;
+
+            DateTime? fallTime = activeFallAlert?.CreatedAt
+                ?? latestFallReading?.RecordedAt
+                ?? lastFallAlert?.CreatedAt;
+
+            client = new ClientDetail
+            {
+                WearableDeviceId = device.Id,
+                PatientId = device.PatientId,
+                ActiveAlertId = activeFallAlert?.Id,
+                DeviceCode = device.DeviceCode,
+
+                Name = device.Patient.FullName,
+                Age = device.Patient.Age,
+                Location = string.IsNullOrWhiteSpace(device.Patient.Location) ? "Home" : device.Patient.Location,
+                MedicalHistory = string.IsNullOrWhiteSpace(device.Patient.MedicalHistory)
+                    ? "Medical history not recorded yet"
+                    : device.Patient.MedicalHistory,
+
+                HasNextOfKin = device.Patient.HasNextOfKin,
+                NextOfKinName = device.Patient.EmergencyContactName,
+                NextOfKinNumber = device.Patient.EmergencyContactPhone,
+
+                FallDetected = fallDetected,
+                FallDetectedAt = fallTime,
+
+                LedActive = latestReading?.LedActive ?? false,
+                BuzzerActive = latestReading?.BuzzerActive ?? false,
+
+                EmergencyServicesCalledAt = activeFallAlert?.EmergencyServicesCalledAt ?? lastFallAlert?.EmergencyServicesCalledAt,
+                NextOfKinCalledAt = activeFallAlert?.NextOfKinCalledAt ?? lastFallAlert?.NextOfKinCalledAt
+            };
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task BackToDashboard()
+    {
+        await JS.InvokeVoidAsync("eval", """
+        if (window.opener) {
+            window.close();
+        } else {
+            window.location.href = "/";
+        }
+    """);
+    }
+
+    private async Task OpenSensorGraph()
+    {
+        await JS.InvokeVoidAsync("open", $"/sensor-graph/{WearableDeviceId}", "_blank");
+    }
+
+    private void OpenEditForm()
+    {
+        if (client == null)
+        {
+            return;
+        }
+
+        var splitLocation = SplitLocation(client.Location);
+
+        editForm = new EditClientForm
+        {
+            PatientId = client.PatientId,
+            FullName = client.Name,
+            Age = client.Age,
+
+            StreetNameAndNumber = splitLocation.StreetNameAndNumber,
+            BlockNumber = splitLocation.BlockNumber,
+            PostalCode = splitLocation.PostalCode,
+            UnitNumber = splitLocation.UnitNumber,
+
+            MedicalHistory = client.MedicalHistory == "Medical history not recorded yet" ? "" : client.MedicalHistory,
+            HasNoNextOfKin = !client.HasNextOfKin,
+            EmergencyContactName = client.NextOfKinName,
+            EmergencyContactPhone = client.NextOfKinNumber
+        };
+
+        showEditForm = true;
+    }
+
+    private void CancelEdit()
+    {
+        showEditForm = false;
+    }
+
+    private async Task SaveEdit()
+    {
+        errorMessage = "";
+        actionMessage = "";
+
+        if (string.IsNullOrWhiteSpace(editForm.FullName))
+        {
+            errorMessage = "Name is required.";
+            return;
+        }
+
+        if (editForm.Age <= 0)
+        {
+            errorMessage = "Age must be more than 0.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(editForm.StreetNameAndNumber))
+        {
+            errorMessage = "Street name and number is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(editForm.BlockNumber))
+        {
+            errorMessage = "Block number is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(editForm.PostalCode))
+        {
+            errorMessage = "Postal code is required.";
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var patient = await db.Patients.FirstOrDefaultAsync(p => p.Id == editForm.PatientId);
+
+            if (patient == null)
+            {
+                errorMessage = "Client could not be found.";
+                return;
+            }
+
+            patient.FullName = editForm.FullName;
+            patient.Age = editForm.Age;
+            patient.Location = BuildLocationText(editForm);
+            patient.MedicalHistory = string.IsNullOrWhiteSpace(editForm.MedicalHistory)
+                ? "Medical history not recorded yet"
+                : editForm.MedicalHistory;
+
+            patient.HasNextOfKin = !editForm.HasNoNextOfKin;
+
+            if (editForm.HasNoNextOfKin)
+            {
+                patient.EmergencyContactName = "";
+                patient.EmergencyContactPhone = "";
+            }
+            else
+            {
+                patient.EmergencyContactName = editForm.EmergencyContactName;
+                patient.EmergencyContactPhone = editForm.EmergencyContactPhone;
+            }
+
+            await db.SaveChangesAsync();
+
+            showEditForm = false;
+            actionMessage = "Client updated successfully.";
+
+            await LoadClient();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task CallEmergencyServices()
+    {
+        if (client == null)
+        {
+            return;
+        }
+
+        if (!client.FallDetected)
+        {
+            actionMessage = "No active fall alert. Emergency action was not recorded.";
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var alert = await GetActiveFallAlert(db);
+
+            if (alert == null)
+            {
+                actionMessage = "No active fall alert found.";
+                return;
+            }
+
+            alert.EmergencyServicesCalledAt = DateTime.Now;
+
+            await db.SaveChangesAsync();
+
+            actionMessage = "Emergency services call recorded.";
+
+            await JS.InvokeVoidAsync("alert", "Emergency services call recorded.");
+
+            await LoadClient();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task CallNextOfKin()
+    {
+        if (client == null)
+        {
+            return;
+        }
+
+        if (!client.HasNextOfKin || string.IsNullOrWhiteSpace(client.NextOfKinNumber))
+        {
+            actionMessage = "No next-of-kin recorded.";
+            return;
+        }
+
+        if (!client.FallDetected)
+        {
+            actionMessage = "No active fall alert. Next-of-kin action was not recorded.";
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var alert = await GetActiveFallAlert(db);
+
+            if (alert == null)
+            {
+                actionMessage = "No active fall alert found.";
+                return;
+            }
+
+            alert.NextOfKinCalledAt = DateTime.Now;
+
+            await db.SaveChangesAsync();
+
+            actionMessage = "Next-of-kin call recorded.";
+
+            await JS.InvokeVoidAsync("alert", $"Next-of-kin call recorded for {client.NextOfKinName}.");
+
+            await LoadClient();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task<AlertEvent?> GetActiveFallAlert(FallDetectionDbContext db)
+    {
+        return await db.AlertEvents
+            .Where(a => a.WearableDeviceId == WearableDeviceId &&
+                        a.IsResolved == false &&
+                        a.AlertType == "Fall Detected")
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task ResetSelected()
+    {
+        errorMessage = "";
+        actionMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var activeAlerts = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == WearableDeviceId && a.IsResolved == false)
+                .ToListAsync();
+
+            if (activeAlerts.Count == 0)
+            {
+                actionMessage = "No active fall alert to reset.";
+                return;
+            }
+
+            bool hasNoActionTaken = activeAlerts.Any(a =>
+                a.EmergencyServicesCalledAt == null &&
+                a.NextOfKinCalledAt == null);
+
+            string resetReason = "";
+
+            if (hasNoActionTaken)
+            {
+                resetReason = await JS.InvokeAsync<string>(
+                    "prompt",
+                    "No emergency action has been recorded yet. Please enter the reason for resetting this alarm:"
+                );
+
+                if (string.IsNullOrWhiteSpace(resetReason))
+                {
+                    errorMessage = "Reset cancelled. A reason is required when resetting without action taken.";
+                    return;
+                }
+            }
+
+            db.SensorReadings.Add(CreateNormalReading(WearableDeviceId));
+
+            foreach (var alert in activeAlerts)
+            {
+                alert.IsResolved = true;
+                alert.ResolvedAt = DateTime.Now;
+                alert.ResolutionType = "Reset";
+
+                if (alert.EmergencyServicesCalledAt == null &&
+                    alert.NextOfKinCalledAt == null)
+                {
+                    alert.ResetReason = resetReason.Trim();
+                }
+            }
+
+            await db.SaveChangesAsync();
+
+            actionMessage = "Client reset successfully.";
+
+            if (client != null && !string.IsNullOrWhiteSpace(client.DeviceCode))
+            {
+                await CommandPublisher.SendResetAlarmCommandAsync(client.DeviceCode);
+            }
+
+            await LoadClient();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task SimulateFall()
+    {
+        errorMessage = "";
+        actionMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var reading = new SensorReading
+            {
+                WearableDeviceId = WearableDeviceId,
+                RecordedAt = DateTime.Now,
+
+                HeartRateBpm = 0,
+                PressureHpa = 998,
+                AltitudeM = 6.5,
+
+                AccelX = 3.8,
+                AccelY = -6.2,
+                AccelZ = 14.8,
+
+                GyroX = 180,
+                GyroY = -95,
+                GyroZ = 60,
+
+                FallDetected = true,
+                LedActive = true,
+                BuzzerActive = true
+            };
+
+            db.SensorReadings.Add(reading);
+
+            var device = await db.WearableDevices
+                .Include(d => d.Patient)
+                .FirstOrDefaultAsync(d => d.Id == WearableDeviceId);
+
+            var alert = new AlertEvent
+            {
+                WearableDeviceId = WearableDeviceId,
+                CreatedAt = DateTime.Now,
+                AlertType = "Fall Detected",
+                Message = $"{device?.Patient?.FullName ?? "Client"} has fallen!",
+                IsResolved = false
+            };
+
+            db.AlertEvents.Add(alert);
+
+            await db.SaveChangesAsync();
+
+            actionMessage = "Fall simulation added.";
+
+            await LoadClient();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task DeleteClient()
+    {
+        if (client == null)
+        {
+            return;
+        }
+
+        bool confirmDelete = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Delete {client.Name}? This will delete their device, readings, and alerts."
+        );
+
+        if (!confirmDelete)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var device = await db.WearableDevices.FirstOrDefaultAsync(d => d.Id == WearableDeviceId);
+
+            if (device == null)
+            {
+                errorMessage = "Device not found.";
+                return;
+            }
+
+            var readings = await db.SensorReadings
+                .Where(r => r.WearableDeviceId == WearableDeviceId)
+                .ToListAsync();
+
+            var alerts = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == WearableDeviceId)
+                .ToListAsync();
+
+            db.SensorReadings.RemoveRange(readings);
+            db.AlertEvents.RemoveRange(alerts);
+            db.WearableDevices.Remove(device);
+
+            var patient = await db.Patients.FirstOrDefaultAsync(p => p.Id == device.PatientId);
+
+            if (patient != null)
+            {
+                db.Patients.Remove(patient);
+            }
+
+            await db.SaveChangesAsync();
+
+            await JS.InvokeVoidAsync("alert", "Client deleted successfully.");
+
+            Navigation.NavigateTo("/");
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage) && string.IsNullOrWhiteSpace(actionMessage))
+        {
+            return Task.CompletedTask;
+        }
+
+        string currentMessageKey = $"{errorMessage}|{actionMessage}";
+
+        if (currentMessageKey == lastMessageKey)
+        {
+            return Task.CompletedTask;
+        }
+
+        lastMessageKey = currentMessageKey;
+
+        _ = ClearMessagesAfterDelay(currentMessageKey);
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ClearMessagesAfterDelay(string messageKey)
+    {
+        await Task.Delay(7000);
+
+        if (lastMessageKey == messageKey)
+        {
+            errorMessage = "";
+            actionMessage = "";
+            lastMessageKey = "";
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private SensorReading CreateNormalReading(int wearableDeviceId)
+    {
+        return new SensorReading
+        {
+            WearableDeviceId = wearableDeviceId,
+            RecordedAt = DateTime.Now,
+
+            HeartRateBpm = 0,
+            PressureHpa = random.Next(1008, 1015),
+            AltitudeM = Math.Round(7 + random.NextDouble() * 2, 2),
+
+            AccelX = Math.Round(random.NextDouble() * 0.4, 2),
+            AccelY = Math.Round(random.NextDouble() * 0.4, 2),
+            AccelZ = Math.Round(9.5 + random.NextDouble() * 0.6, 2),
+
+            GyroX = Math.Round(random.NextDouble() * 0.2, 2),
+            GyroY = Math.Round(random.NextDouble() * 0.2, 2),
+            GyroZ = Math.Round(random.NextDouble() * 0.2, 2),
+
+            FallDetected = false,
+            LedActive = false,
+            BuzzerActive = false
+        };
+    }
+
+    private void OnFallCountRangeChanged(ChangeEventArgs e)
+    {
+        selectedFallCountRange = e.Value?.ToString() ?? "days";
+        BuildFallCountChart();
+    }
+
+    private void BuildFallCountChart()
+    {
+        if (fallHistory.Count == 0)
+        {
+            fallCountBars = new List<FallCountBar>();
+            return;
+        }
+
+        DateTime now = DateTime.Now;
+
+        if (selectedFallCountRange == "days")
+        {
+            fallCountBars = Enumerable.Range(0, 7)
+                .Select(i =>
+                {
+                    DateTime day = now.Date.AddDays(-6 + i);
+
+                    return new FallCountBar
+                    {
+                        Label = day.ToString("dd MMM"),
+                        Count = fallHistory.Count(f => f.FallDetectedAt.Date == day)
+                    };
+                })
+                .ToList();
+        }
+        else if (selectedFallCountRange == "weeks")
+        {
+            DateTime currentWeekStart = StartOfWeek(now.Date);
+
+            fallCountBars = Enumerable.Range(0, 4)
+                .Select(i =>
+                {
+                    DateTime weekStart = currentWeekStart.AddDays(-7 * (3 - i));
+                    DateTime weekEnd = weekStart.AddDays(7);
+                    DateTime displayEnd = weekEnd.AddDays(-1);
+
+                    return new FallCountBar
+                    {
+                        Label = $"{weekStart:dd MMM} - {displayEnd:dd MMM}",
+                        Count = fallHistory.Count(f =>
+                            f.FallDetectedAt.Date >= weekStart &&
+                            f.FallDetectedAt.Date < weekEnd)
+                    };
+                })
+                .ToList();
+        }
+        else if (selectedFallCountRange == "months")
+        {
+            fallCountBars = Enumerable.Range(0, 12)
+                .Select(i =>
+                {
+                    DateTime month = new DateTime(now.Year, now.Month, 1).AddMonths(-11 + i);
+
+                    return new FallCountBar
+                    {
+                        Label = month.ToString("MMM yy"),
+                        Count = fallHistory.Count(f =>
+                            f.FallDetectedAt.Year == month.Year &&
+                            f.FallDetectedAt.Month == month.Month)
+                    };
+                })
+                .ToList();
+        }
+        else
+        {
+            int startYear = now.Year - 4;
+
+            fallCountBars = Enumerable.Range(0, 5)
+                .Select(i =>
+                {
+                    int year = startYear + i;
+
+                    return new FallCountBar
+                    {
+                        Label = year.ToString(),
+                        Count = fallHistory.Count(f => f.FallDetectedAt.Year == year)
+                    };
+                })
+                .ToList();
+        }
+
+        int maxCount = fallCountBars.Max(b => b.Count);
+
+        foreach (var bar in fallCountBars)
+        {
+            bar.WidthPercent = bar.Count == 0 || maxCount == 0
+                ? 0
+                : Math.Max(8, bar.Count * 100 / maxCount);
+        }
+    }
+
+    private DateTime StartOfWeek(DateTime date)
+    {
+        int diff = (7 + (date.DayOfWeek - DayOfWeek.Monday)) % 7;
+        return date.AddDays(-diff).Date;
+    }
+
+    private string BuildLocationText(EditClientForm form)
+    {
+        string location = $"Block {form.BlockNumber}, {form.StreetNameAndNumber}, Singapore {form.PostalCode}";
+
+        if (!string.IsNullOrWhiteSpace(form.UnitNumber))
+        {
+            location += $", {form.UnitNumber}";
+        }
+
+        return location;
+    }
+
+    private LocationParts SplitLocation(string location)
+    {
+        var result = new LocationParts();
+
+        if (string.IsNullOrWhiteSpace(location) || location == "Home")
+        {
+            return result;
+        }
+
+        string[] parts = location.Split(',', StringSplitOptions.TrimEntries);
+
+        if (parts.Length >= 1)
+        {
+            result.BlockNumber = parts[0].Replace("Block", "", StringComparison.OrdinalIgnoreCase).Trim();
+        }
+
+        if (parts.Length >= 2)
+        {
+            result.StreetNameAndNumber = parts[1].Trim();
+        }
+
+        if (parts.Length >= 3)
+        {
+            result.PostalCode = parts[2].Replace("Singapore", "", StringComparison.OrdinalIgnoreCase).Trim();
+        }
+
+        if (parts.Length >= 4)
+        {
+            result.UnitNumber = parts[3].Trim();
+        }
+
+        return result;
+    }
+
+    private class LocationParts
+    {
+        public string StreetNameAndNumber { get; set; } = "";
+        public string BlockNumber { get; set; } = "";
+        public string PostalCode { get; set; } = "";
+        public string UnitNumber { get; set; } = "";
+    }
+
+    private class EditClientForm
+    {
+        public int PatientId { get; set; }
+        public string FullName { get; set; } = "";
+        public int Age { get; set; } = 75;
+
+        public string StreetNameAndNumber { get; set; } = "";
+        public string BlockNumber { get; set; } = "";
+        public string PostalCode { get; set; } = "";
+        public string UnitNumber { get; set; } = "";
+
+        public string MedicalHistory { get; set; } = "";
+        public bool HasNoNextOfKin { get; set; } = false;
+        public string EmergencyContactName { get; set; } = "";
+        public string EmergencyContactPhone { get; set; } = "";
+    }
+
+    private class FallCountBar
+    {
+        public string Label { get; set; } = "";
+        public int Count { get; set; }
+        public int WidthPercent { get; set; }
+    }
+
+    private class FallHistoryRow
+    {
+        public DateTime FallDetectedAt { get; set; }
+        public DateTime LastUpdatedAt { get; set; }
+
+        public DateTime? EmergencyServicesCalledAt { get; set; }
+        public DateTime? NextOfKinCalledAt { get; set; }
+        public DateTime? ResolvedAt { get; set; }
+        public string ResolutionType { get; set; } = "";
+        public string ResetReason { get; set; } = "";
+
+        public string FallDetectedAtText
+        {
+            get
+            {
+                return FallDetectedAt.ToString("dd/MM/yyyy hh:mm:ss tt");
+            }
+        }
+
+        public string LastUpdatedAtText
+        {
+            get
+            {
+                return LastUpdatedAt.ToString("dd/MM/yyyy hh:mm:ss tt");
+            }
+        }
+
+        public string ActionTakenText
+        {
+            get
+            {
+                bool emergencyCalled = EmergencyServicesCalledAt != null;
+                bool nextOfKinCalled = NextOfKinCalledAt != null;
+                bool resolved = ResolvedAt != null;
+
+                if (emergencyCalled && nextOfKinCalled)
+                {
+                    return "Emergency services and next-of-kin called";
+                }
+
+                if (emergencyCalled)
+                {
+                    return "Emergency services called";
+                }
+
+                if (nextOfKinCalled)
+                {
+                    return "Next-of-kin called";
+                }
+
+                if (resolved)
+                {
+                    if (ResolutionType == "Cleared")
+                    {
+                        return "Cleared";
+                    }
+
+                    if (ResolutionType == "Reset")
+                    {
+                        return "Reset";
+                    }
+
+                    return "Resolved";
+                }
+
+                return "No action recorded yet";
+            }
+        }
+
+        public string ActionTakenAtText
+        {
+            get
+            {
+                DateTime? actionTime = EmergencyServicesCalledAt
+                    ?? NextOfKinCalledAt
+                    ?? ResolvedAt;
+
+                return actionTime?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "--";
+            }
+        }
+
+        public string ResetReasonText
+        {
+            get
+            {
+                if (string.IsNullOrWhiteSpace(ResetReason))
+                {
+                    return "--";
+                }
+
+                return ResetReason;
+            }
+        }
+    }
+
+    private class ClientDetail
+    {
+        public int WearableDeviceId { get; set; }
+        public int PatientId { get; set; }
+        public int? ActiveAlertId { get; set; }
+        public string DeviceCode { get; set; } = "";
+
+        public string Name { get; set; } = "";
+        public int Age { get; set; }
+        public string Location { get; set; } = "Home";
+        public string MedicalHistory { get; set; } = "Medical history not recorded yet";
+
+        public bool HasNextOfKin { get; set; } = true;
+        public string NextOfKinName { get; set; } = "";
+        public string NextOfKinNumber { get; set; } = "";
+
+        public bool FallDetected { get; set; }
+        public DateTime? FallDetectedAt { get; set; }
+
+        public bool LedActive { get; set; }
+        public bool BuzzerActive { get; set; }
+
+        public DateTime? EmergencyServicesCalledAt { get; set; }
+        public DateTime? NextOfKinCalledAt { get; set; }
+
+        public string NextOfKinNameText
+        {
+            get
+            {
+                if (!HasNextOfKin || string.IsNullOrWhiteSpace(NextOfKinName))
+                {
+                    return "Not recorded yet";
+                }
+
+                return NextOfKinName;
+            }
+        }
+
+        public string NextOfKinNumberText
+        {
+            get
+            {
+                if (!HasNextOfKin || string.IsNullOrWhiteSpace(NextOfKinNumber))
+                {
+                    return "Not recorded yet";
+                }
+
+                return NextOfKinNumber;
+            }
+        }
+
+        public string FallDetectedAtText
+        {
+            get
+            {
+                return FallDetectedAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "--";
+            }
+        }
+
+        public string EmergencyServicesCalledAtText
+        {
+            get
+            {
+                return EmergencyServicesCalledAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "Not recorded yet";
+            }
+        }
+
+        public string NextOfKinCalledAtText
+        {
+            get
+            {
+                return NextOfKinCalledAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "Not recorded yet";
+            }
+        }
+
+        public string ActionTakenText
+        {
+            get
+            {
+                bool emergencyCalled = EmergencyServicesCalledAt != null;
+                bool nextOfKinCalled = NextOfKinCalledAt != null;
+
+                if (emergencyCalled && nextOfKinCalled)
+                {
+                    return $"Emergency called at {EmergencyServicesCalledAtText}; Next-of-kin called at {NextOfKinCalledAtText}";
+                }
+
+                if (emergencyCalled)
+                {
+                    return $"Emergency called at {EmergencyServicesCalledAtText}";
+                }
+
+                if (nextOfKinCalled)
+                {
+                    return $"Next-of-kin called at {NextOfKinCalledAtText}";
+                }
+
+                return "No action recorded yet";
+            }
+        }
+    }
+}

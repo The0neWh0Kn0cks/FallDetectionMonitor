@@ -1,0 +1,162 @@
+﻿@page "/test-database"
+@rendermode InteractiveServer
+
+@using FallDetectionMonitor.Data
+@using FallDetectionMonitor.Models
+@using Microsoft.EntityFrameworkCore
+
+@inject IDbContextFactory<FallDetectionDbContext> DbFactory
+
+<h3>Database Test Page</h3>
+
+<p>This page checks whether the Blazor app can read and write sensor data.</p>
+
+<button class="btn btn-primary" @onclick="AddFakeReading" disabled="@isSaving">
+    @(isSaving ? "Adding..." : "Add Fake Sensor Reading")
+</button>
+
+@if (!string.IsNullOrWhiteSpace(errorMessage))
+{
+    <div class="alert alert-danger mt-3">
+        <strong>Error:</strong> @errorMessage
+    </div>
+}
+
+@if (!string.IsNullOrWhiteSpace(successMessage))
+{
+    <div class="alert alert-success mt-3">
+        @successMessage
+    </div>
+}
+
+<hr />
+
+@if (latestReading == null)
+{
+    <p>No sensor readings found yet.</p>
+}
+else
+{
+    <h4>Latest Sensor Reading</h4>
+
+    <p><strong>Heart Rate:</strong> @latestReading.HeartRateBpm BPM</p>
+    <p><strong>Pressure:</strong> @latestReading.PressureHpa hPa</p>
+    <p><strong>Altitude:</strong> @latestReading.AltitudeM m</p>
+    <p><strong>Accel X:</strong> @latestReading.AccelX</p>
+    <p><strong>Accel Y:</strong> @latestReading.AccelY</p>
+    <p><strong>Accel Z:</strong> @latestReading.AccelZ</p>
+    <p><strong>Gyro X:</strong> @latestReading.GyroX</p>
+    <p><strong>Gyro Y:</strong> @latestReading.GyroY</p>
+    <p><strong>Gyro Z:</strong> @latestReading.GyroZ</p>
+    <p><strong>Fall Detected:</strong> @latestReading.FallDetected</p>
+    <p><strong>LED Active:</strong> @latestReading.LedActive</p>
+    <p><strong>Buzzer Active:</strong> @latestReading.BuzzerActive</p>
+    <p><strong>Recorded At:</strong> @latestReading.RecordedAt</p>
+}
+
+@code {
+    private SensorReading? latestReading;
+    private bool isSaving = false;
+    private string errorMessage = "";
+    private string successMessage = "";
+
+    private static readonly Random random = new Random();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadLatestReading();
+    }
+
+    private async Task LoadLatestReading()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+
+        latestReading = await db.SensorReadings
+            .OrderByDescending(r => r.RecordedAt)
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task AddFakeReading()
+    {
+        if (isSaving)
+        {
+            return;
+        }
+
+        isSaving = true;
+        errorMessage = "";
+        successMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            Patient? patient = await db.Patients.FirstOrDefaultAsync();
+
+            if (patient == null)
+            {
+                patient = new Patient
+                {
+                    FullName = "Test Elderly Patient",
+                    Age = 75,
+                    EmergencyContactName = "Irfan",
+                    EmergencyContactPhone = "91234567"
+                };
+
+                db.Patients.Add(patient);
+                await db.SaveChangesAsync();
+            }
+
+            WearableDevice? wearableDevice = await db.WearableDevices.FirstOrDefaultAsync();
+
+            if (wearableDevice == null)
+            {
+                wearableDevice = new WearableDevice
+                {
+                    DeviceName = "Fall Detection Watch 1",
+                    DeviceCode = "FDW001",
+                    PatientId = patient.Id
+                };
+
+                db.WearableDevices.Add(wearableDevice);
+                await db.SaveChangesAsync();
+            }
+
+            var newReading = new SensorReading
+            {
+                WearableDeviceId = wearableDevice.Id,
+                RecordedAt = DateTime.Now,
+
+                HeartRateBpm = random.Next(55, 130),
+                PressureHpa = 1012.5,
+                AltitudeM = 8.2,
+
+                AccelX = Math.Round(random.NextDouble() * 2, 2),
+                AccelY = Math.Round(random.NextDouble() * 2, 2),
+                AccelZ = Math.Round(8 + random.NextDouble() * 3, 2),
+
+                GyroX = Math.Round(random.NextDouble(), 2),
+                GyroY = Math.Round(random.NextDouble(), 2),
+                GyroZ = Math.Round(random.NextDouble(), 2),
+
+                FallDetected = random.Next(0, 5) == 1,
+                LedActive = random.Next(0, 2) == 1,
+                BuzzerActive = random.Next(0, 2) == 1
+            };
+
+            db.SensorReadings.Add(newReading);
+            await db.SaveChangesAsync();
+
+            latestReading = newReading;
+            successMessage = "Fake sensor reading added successfully.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isSaving = false;
+        }
+    }
+}

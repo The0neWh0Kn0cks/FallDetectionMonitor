@@ -1,0 +1,18 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+
+*.zip
+*.csv
+*.xlsx
+*.log
+
+appsettings.Development.json
+
+# PlatformIO later when your friend adds ESP32
+.pio/
+.pioenvs/
+.piolibdeps/

@@ -1,0 +1,118 @@
+﻿@page "/mqtt-test"
+@rendermode InteractiveServer
+
+@using System.Text.Json
+@using MQTTnet
+@using MQTTnet.Protocol
+
+<h3>MQTT Test Publisher</h3>
+
+<p>This page sends a fake MQTT message to test whether the dashboard receives it.</p>
+
+<label>Device Code</label>
+<input @bind="deviceCode" />
+
+<div style="margin-top: 15px;">
+    <button class="btn btn-danger" @onclick="PublishFallDetected">
+        Publish Fall Detected
+    </button>
+
+    <button class="btn btn-success" @onclick="PublishAlarmCleared">
+        Publish Alarm Cleared
+    </button>
+</div>
+
+@if (!string.IsNullOrWhiteSpace(message))
+{
+    <p style="margin-top: 15px;">@message</p>
+}
+
+@code {
+    private const string MqttBroker = "broker.hivemq.com";
+    private const int MqttPort = 1883;
+    private const string MqttTopic = "fall-detection-monitor/irfan/alerts";
+
+    private string deviceCode = "FDW001";
+    private string message = "";
+
+    private async Task PublishFallDetected()
+    {
+        var payload = new
+        {
+            deviceCode = deviceCode,
+            eventType = "fall_detected",
+
+            pressureHpa = 998,
+            altitudeM = 6.5,
+
+            accelX = 3.8,
+            accelY = -6.2,
+            accelZ = 14.8,
+
+            gyroX = 180,
+            gyroY = -95,
+            gyroZ = 60,
+
+            ledActive = true,
+            buzzerActive = true
+        };
+
+        await PublishPayload(payload);
+
+        message = "Fall detected MQTT message sent.";
+    }
+
+    private async Task PublishAlarmCleared()
+    {
+        var payload = new
+        {
+            deviceCode = deviceCode,
+            eventType = "alarm_cleared",
+
+            pressureHpa = 1012,
+            altitudeM = 8.2,
+
+            accelX = 0.1,
+            accelY = 0.1,
+            accelZ = 9.81,
+
+            gyroX = 0.0,
+            gyroY = 0.0,
+            gyroZ = 0.0,
+
+            ledActive = false,
+            buzzerActive = false
+        };
+
+        await PublishPayload(payload);
+
+        message = "Alarm cleared MQTT message sent.";
+    }
+
+    private async Task PublishPayload(object payloadObject)
+    {
+        var mqttFactory = new MqttClientFactory();
+
+        using var mqttClient = mqttFactory.CreateMqttClient();
+
+        var mqttOptions = new MqttClientOptionsBuilder()
+            .WithClientId($"MqttTestPublisher_{Guid.NewGuid():N}")
+            .WithTcpServer(MqttBroker, MqttPort)
+            .WithCleanSession()
+            .Build();
+
+        string json = JsonSerializer.Serialize(payloadObject);
+
+        await mqttClient.ConnectAsync(mqttOptions, CancellationToken.None);
+
+        var mqttMessage = new MqttApplicationMessageBuilder()
+            .WithTopic(MqttTopic)
+            .WithPayload(json)
+            .WithQualityOfServiceLevel(MqttQualityOfServiceLevel.AtLeastOnce)
+            .Build();
+
+        await mqttClient.PublishAsync(mqttMessage, CancellationToken.None);
+
+        await mqttClient.DisconnectAsync();
+    }
+}

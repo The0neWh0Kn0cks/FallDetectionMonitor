@@ -1,0 +1,517 @@
+﻿.dashboard-page {
+    min-height: 100vh;
+    background: #f3f6fb;
+    color: #1f2937;
+    font-family: Arial, sans-serif;
+}
+
+header {
+    background: #111827;
+    color: white;
+    text-align: center;
+    padding: 25px;
+}
+
+    header h1 {
+        font-size: 34px;
+        margin-bottom: 8px;
+    }
+
+    header p {
+        font-size: 16px;
+    }
+
+main {
+    width: 94%;
+    margin: 24px auto;
+}
+
+/* Top message boxes and buttons */
+.top-actions,
+.error-box,
+.success-box {
+    background: white;
+    padding: 18px;
+    border-radius: 14px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.error-box {
+    color: #991b1b;
+    background: #fee2e2;
+}
+
+.success-box {
+    color: #166534;
+    background: #dcfce7;
+}
+
+button {
+    padding: 11px 16px;
+    margin: 5px;
+    border: none;
+    border-radius: 10px;
+    background: #2563eb;
+    color: white;
+    cursor: pointer;
+    font-size: 15px;
+}
+
+    button:hover {
+        opacity: 0.86;
+    }
+
+    button:disabled {
+        background: #9ca3af;
+        cursor: not-allowed;
+    }
+
+.danger-btn,
+.danger-btn-small {
+    background: #dc2626;
+}
+
+.danger-btn-small {
+    padding: 7px 10px;
+    font-size: 13px;
+}
+
+.demo-btn,
+.demo-btn-small {
+    background: #7c3aed;
+}
+
+.demo-btn-small {
+    padding: 7px 10px;
+    font-size: 13px;
+    margin: 0;
+}
+
+.call-btn {
+    background: #dc2626;
+}
+
+.secondary-btn {
+    background: #6b7280;
+}
+
+/* Main dashboard layout */
+.home-grid {
+    display: grid;
+    grid-template-columns: 3fr 1fr;
+    gap: 18px;
+    height: calc(100vh - 260px);
+    min-height: 700px;
+}
+
+.client-list-panel,
+.alarm-panel {
+    background: white;
+    border-radius: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+    padding: 18px;
+    overflow: hidden;
+}
+
+.client-list-panel {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+}
+
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 20px;
+    align-items: center;
+    margin-bottom: 14px;
+    flex-shrink: 0;
+}
+
+    .panel-header h2,
+    .alarm-panel h2 {
+        margin-bottom: 5px;
+    }
+
+    .panel-header p {
+        color: #6b7280;
+    }
+
+.search-box {
+    width: 280px;
+    padding: 11px;
+    border: 1px solid #cbd5e1;
+    border-radius: 10px;
+    font-size: 15px;
+}
+
+/* Client table */
+.client-table-scroll {
+    flex: 1 1 auto;
+    min-height: 250px;
+    height: auto;
+    overflow-y: auto;
+    border: 1px solid #e5e7eb;
+    border-radius: 12px;
+}
+
+.client-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+    .client-table th {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        background: #111827;
+        color: white;
+        padding: 13px;
+        text-align: left;
+    }
+
+    .client-table td {
+        padding: 13px;
+        border-bottom: 1px solid #e5e7eb;
+    }
+
+.client-row {
+    cursor: pointer;
+}
+
+    .client-row:hover {
+        background: #f9fafb;
+    }
+
+.fall-row {
+    background: #fee2e2;
+    color: #991b1b;
+    font-weight: bold;
+}
+
+    .fall-row:hover {
+        background: #fecaca;
+    }
+
+.normal-text {
+    color: green;
+    font-weight: bold;
+}
+
+.danger-text {
+    color: red;
+    font-weight: bold;
+}
+
+.empty-table-text {
+    text-align: center;
+    color: #6b7280;
+    padding: 30px;
+}
+
+/* Row hover buttons */
+.row-hover-actions {
+    visibility: hidden;
+    display: flex;
+    gap: 6px;
+}
+
+.client-row:hover .row-hover-actions {
+    visibility: visible;
+}
+
+.row-hover-actions button {
+    padding: 7px 10px;
+    font-size: 13px;
+    margin: 0;
+}
+
+/* Last fall detected section */
+.last-fall-box {
+    flex: 0 0 auto;
+    max-height: 260px;
+    overflow-y: auto;
+    margin-top: 15px;
+    background: #f9fafb;
+    padding: 14px;
+    border-radius: 12px;
+    border-left: 6px solid #dc2626;
+}
+
+    .last-fall-box h3 {
+        margin-bottom: 8px;
+    }
+
+.last-fall-content {
+    cursor: pointer;
+}
+
+    .last-fall-content:hover {
+        background: #f3f4f6;
+        border-radius: 10px;
+    }
+
+.last-fall-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.last-fall-item {
+    background: white;
+    padding: 10px;
+    border-radius: 10px;
+}
+
+    .last-fall-item strong {
+        display: block;
+        margin-bottom: 4px;
+    }
+
+    .last-fall-item p {
+        margin: 0;
+        font-size: 14px;
+    }
+
+.action-full {
+    grid-column: span 3;
+}
+
+/* Alarm panel */
+.alarm-panel {
+    min-height: 0;
+}
+
+.alarm-scroll {
+    height: calc(100% - 45px);
+    overflow-y: auto;
+}
+
+.no-alarm-text {
+    color: #6b7280;
+    margin-top: 15px;
+}
+
+.alarm-card {
+    background: #fee2e2;
+    border-left: 5px solid red;
+    border-radius: 10px;
+    padding: 9px 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+    .alarm-card:hover {
+        background: #fecaca;
+    }
+
+    .alarm-card h3 {
+        color: #991b1b;
+        font-size: 18px;
+        margin-bottom: 4px;
+    }
+
+    .alarm-card p {
+        margin: 3px 0;
+        font-size: 14px;
+    }
+
+/* Add/Edit popup form */
+.form-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,0.75);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+    padding: 20px;
+}
+
+.person-form-box {
+    background: white;
+    padding: 28px;
+    border-radius: 18px;
+    width: 95%;
+    max-width: 560px;
+    max-height: 90vh;
+    overflow-y: auto;
+    box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+
+    .person-form-box h2 {
+        margin-bottom: 18px;
+    }
+
+    .person-form-box label {
+        display: block;
+        margin-top: 12px;
+        margin-bottom: 5px;
+        font-weight: bold;
+    }
+
+    .person-form-box input,
+    .person-form-box textarea {
+        width: 100%;
+        padding: 11px;
+        border: 1px solid #cbd5e1;
+        border-radius: 10px;
+        font-size: 15px;
+    }
+
+    .person-form-box textarea {
+        min-height: 90px;
+        resize: vertical;
+    }
+
+.checkbox-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+}
+
+    .checkbox-row input {
+        width: auto;
+    }
+
+    .checkbox-row label {
+        margin: 0;
+    }
+
+.form-actions {
+    margin-top: 18px;
+}
+
+/* Old same-page detail styling, kept only so old code will not look broken */
+.details-page {
+    background: white;
+    padding: 20px;
+    border-radius: 14px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+}
+
+.details-top-row {
+    margin-bottom: 15px;
+}
+
+.detail-card {
+    padding: 22px;
+    border-radius: 16px;
+    border-left: 8px solid green;
+}
+
+.detail-normal {
+    background: white;
+}
+
+.detail-danger {
+    background: #fee2e2;
+    border-left-color: red;
+}
+
+.detail-card h2 {
+    margin-bottom: 18px;
+}
+
+.detail-main-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 14px;
+}
+
+    .detail-main-grid p {
+        background: #f9fafb;
+        padding: 13px;
+        border-radius: 10px;
+    }
+
+.detail-danger .detail-main-grid p {
+    background: #fff7f7;
+}
+
+.detail-actions {
+    margin-top: 20px;
+}
+
+/* Responsive */
+@media (max-width: 1000px) {
+    .home-grid {
+        grid-template-columns: 1fr;
+        height: auto;
+        min-height: unset;
+    }
+
+    .client-table-scroll,
+    .alarm-scroll {
+        height: 420px;
+    }
+
+    .panel-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+
+    .search-box {
+        width: 100%;
+    }
+
+    .last-fall-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .action-full {
+        grid-column: span 1;
+    }
+
+    .detail-main-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+.form-section-title {
+    margin-top: 18px;
+    margin-bottom: 8px;
+    font-size: 18px;
+    color: #111827;
+}
+
+.required-star {
+    color: #dc2626;
+}
+
+.optional-text {
+    color: #6b7280;
+    font-weight: normal;
+}
+
+.silent-btn {
+    background: #f59e0b;
+}
+
+@keyframes alarmPulse {
+    0% {
+        background-color: #fee2e2;
+        box-shadow: 0 0 0 rgba(220, 38, 38, 0);
+    }
+
+    50% {
+        background-color: #fecaca;
+        box-shadow: 0 0 18px rgba(220, 38, 38, 0.45);
+    }
+
+    100% {
+        background-color: #fee2e2;
+        box-shadow: 0 0 0 rgba(220, 38, 38, 0);
+    }
+}
+
+.alarm-flashing {
+    animation: alarmPulse 1s infinite;
+}
+
+.alarm-flashing-row {
+    animation: alarmPulse 1s infinite;
+}

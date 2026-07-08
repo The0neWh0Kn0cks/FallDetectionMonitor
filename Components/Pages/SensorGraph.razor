@@ -1,0 +1,394 @@
+﻿@page "/sensor-graph/{WearableDeviceId:int}"
+@rendermode InteractiveServer
+
+@using FallDetectionMonitor.Data
+@using FallDetectionMonitor.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+
+@inject IDbContextFactory<FallDetectionDbContext> DbFactory
+@inject IJSRuntime JS
+
+@implements IAsyncDisposable
+
+<div class="sensor-graph-page">
+    <header class="graph-header">
+        <h1>Sensor Graph Data</h1>
+        <p>@clientName</p>
+        <p class="graph-subtitle">Live sensor readings from the wearable device</p>
+    </header>
+
+    <div class="graph-actions">
+        <button @onclick="RefreshNow">Refresh Now</button>
+        <button @onclick="CloseTab">Close Tab</button>
+    </div>
+
+    @if (!string.IsNullOrWhiteSpace(errorMessage))
+    {
+        <div class="error-box">
+            <strong>Error:</strong> @errorMessage
+        </div>
+    }
+
+    @if (isLoading)
+    {
+        <div class="info-box">
+            Loading graph data...
+        </div>
+    }
+    else if (readings.Count == 0)
+    {
+        <div class="info-box">
+            No sensor readings found yet. Enable ESP32 telemetry or simulate readings first.
+        </div>
+    }
+    else
+    {
+        <section class="latest-reading-card">
+            <h2>Latest Reading</h2>
+            <div class="latest-grid">
+                <div>
+                    <strong>Recorded At</strong>
+                    <p>@latestReading?.RecordedAtText</p>
+                </div>
+                <div>
+                    <strong>Accel Magnitude</strong>
+                    <p>@latestReading?.AccelMag.ToString("0.00") m/s²</p>
+                </div>
+                <div>
+                    <strong>Gyro Magnitude</strong>
+                    <p>@latestReading?.GyroMag.ToString("0.00")</p>
+                </div>
+                <div>
+                    <strong>ML Fall Score</strong>
+                    <p class="@(displayMlTriggered ? "danger-text" : "safe-text")">
+                        @displayMlScore.ToString("0.000")
+                    </p>
+                </div>
+                <div>
+                    <strong>ML Triggered</strong>
+                    <p class="@(displayMlTriggered ? "danger-text" : "safe-text")">
+                        @(displayMlTriggered ? "YES" : "NO")
+                    </p>
+                </div>
+                <div>
+                    <strong>Fall Detected</strong>
+                    <p class="@(activeFallDetected ? "danger-text" : "safe-text")">
+                        @(activeFallDetected ? "YES" : "NO")
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <section class="chart-card">
+            <h2>Accelerometer Data</h2>
+            <p class="chart-note">
+                Stationary device should have AccelMag around 9.81 m/s². Large spikes may indicate movement or sensor noise.
+            </p>
+            <canvas id="accChart"></canvas>
+        </section>
+
+        <section class="chart-card">
+            <h2>Gyroscope Data</h2>
+            <p class="chart-note">
+                Stationary device should have low gyroscope values. Large spikes mean rotation or shaking.
+            </p>
+            <canvas id="gyroChart"></canvas>
+        </section>
+
+        <section class="chart-card">
+            <h2>Altitude / Pressure Data</h2>
+            <p class="chart-note">
+                Sudden altitude change may help confirm fall movement using the barometer.
+            </p>
+            <canvas id="baroChart"></canvas>
+        </section>
+
+        <section class="chart-card">
+            <h2>TinyML Fall Score</h2>
+            <p class="chart-note">
+                If this stays near 1.0 while AccelMag and GyroMag are stable, the problem is likely the ML model, not the sensor.
+            </p>
+            <canvas id="mlChart"></canvas>
+        </section>
+
+        <section class="readings-table-card">
+            <h2>Latest Raw Readings</h2>
+
+            <div class="readings-scroll">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Time</th>
+                            <th>AccelX</th>
+                            <th>AccelY</th>
+                            <th>AccelZ</th>
+                            <th>AccelMag</th>
+                            <th>GyroX</th>
+                            <th>GyroY</th>
+                            <th>GyroZ</th>
+                            <th>GyroMag</th>
+                            <th>Altitude</th>
+                            <th>ML Score</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var r in readings.OrderByDescending(r => r.RecordedAt).Take(20))
+                        {
+                            <tr>
+                                <td>@r.RecordedAtText</td>
+                                <td>@r.AccelX.ToString("0.00")</td>
+                                <td>@r.AccelY.ToString("0.00")</td>
+                                <td>@r.AccelZ.ToString("0.00")</td>
+                                <td>@r.AccelMag.ToString("0.00")</td>
+                                <td>@r.GyroX.ToString("0.00")</td>
+                                <td>@r.GyroY.ToString("0.00")</td>
+                                <td>@r.GyroZ.ToString("0.00")</td>
+                                <td>@r.GyroMag.ToString("0.00")</td>
+                                <td>@r.AltitudeM.ToString("0.00")</td>
+                                <td>@r.MlFallScore.ToString("0.000")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    [Parameter]
+    public int WearableDeviceId { get; set; }
+
+    private bool isLoading = true;
+    private string errorMessage = "";
+    private string clientName = "Client";
+
+    private List<GraphReading> readings = new();
+    private GraphReading? latestReading;
+
+    private bool activeFallDetected = false;
+    private bool displayMlTriggered = false;
+    private double displayMlScore = 0;
+
+    private PeriodicTimer? refreshTimer;
+    private CancellationTokenSource? refreshCts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGraphData();
+
+        refreshCts = new CancellationTokenSource();
+        _ = AutoRefreshLoop(refreshCts.Token);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (readings.Count > 0)
+        {
+            await RenderCharts();
+        }
+    }
+
+    private async Task AutoRefreshLoop(CancellationToken token)
+    {
+        refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            while (await refreshTimer.WaitForNextTickAsync(token))
+            {
+                await LoadGraphData();
+
+                await InvokeAsync(async () =>
+                {
+                    StateHasChanged();
+                    await RenderCharts();
+                });
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Page closed, timer stopped.
+        }
+    }
+
+    private async Task RefreshNow()
+    {
+        await LoadGraphData();
+        await RenderCharts();
+    }
+
+    private async Task LoadGraphData()
+    {
+        try
+        {
+            isLoading = true;
+            errorMessage = "";
+
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var device = await db.WearableDevices
+                .Include(d => d.Patient)
+                .FirstOrDefaultAsync(d => d.Id == WearableDeviceId);
+
+            if (device == null)
+            {
+                errorMessage = "Wearable device not found.";
+                return;
+            }
+
+            clientName = $"{device.Patient?.FullName ?? "Client"} ({device.DeviceCode})";
+
+            activeFallDetected = await db.AlertEvents
+                 .AnyAsync(a => a.WearableDeviceId == WearableDeviceId &&
+                                a.IsResolved == false &&
+                                a.AlertType == "Fall Detected");
+
+            readings = await db.SensorReadings
+                .Where(r => r.WearableDeviceId == WearableDeviceId)
+                .OrderByDescending(r => r.RecordedAt)
+                .Take(120)
+                .OrderBy(r => r.RecordedAt)
+                .Select(r => new GraphReading
+                {
+                    RecordedAt = r.RecordedAt,
+
+                    AccelX = r.AccelX,
+                    AccelY = r.AccelY,
+                    AccelZ = r.AccelZ,
+
+                    GyroX = r.GyroX,
+                    GyroY = r.GyroY,
+                    GyroZ = r.GyroZ,
+
+                    PressureHpa = r.PressureHpa,
+                    AltitudeM = r.AltitudeM,
+
+                    FallDetected = r.FallDetected,
+                    LedActive = r.LedActive,
+                    BuzzerActive = r.BuzzerActive,
+
+                    MlFallScore = r.MlFallScore,
+                    MlTriggered = r.MlTriggered
+                })
+                .ToListAsync();
+
+            latestReading = readings.LastOrDefault();
+
+            displayMlScore = latestReading?.MlFallScore ?? 0;
+
+            displayMlTriggered =
+                activeFallDetected ||
+                latestReading?.MlTriggered == true ||
+                displayMlScore >= 0.70;
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task RenderCharts()
+    {
+        if (readings.Count == 0)
+        {
+            return;
+        }
+
+        var chartData = new
+        {
+            labels = readings.Select(r => r.RecordedAt.ToString("HH:mm:ss")).ToList(),
+
+            accelX = readings.Select(r => r.AccelX).ToList(),
+            accelY = readings.Select(r => r.AccelY).ToList(),
+            accelZ = readings.Select(r => r.AccelZ).ToList(),
+            accelMag = readings.Select(r => r.AccelMag).ToList(),
+
+            gyroX = readings.Select(r => r.GyroX).ToList(),
+            gyroY = readings.Select(r => r.GyroY).ToList(),
+            gyroZ = readings.Select(r => r.GyroZ).ToList(),
+            gyroMag = readings.Select(r => r.GyroMag).ToList(),
+
+            pressure = readings.Select(r => r.PressureHpa).ToList(),
+            altitude = readings.Select(r => r.AltitudeM).ToList(),
+
+            mlFallScore = readings.Select(r => r.MlFallScore).ToList()
+        };
+
+        await JS.InvokeVoidAsync("sensorGraph.render", chartData);
+    }
+
+    private async Task CloseTab()
+    {
+        await JS.InvokeVoidAsync("eval", """
+            if (window.opener) {
+                window.close();
+            } else {
+                window.location.href = "/";
+            }
+        """);
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (refreshCts != null)
+        {
+            await refreshCts.CancelAsync();
+            refreshCts.Dispose();
+        }
+
+        refreshTimer?.Dispose();
+    }
+
+    private class GraphReading
+    {
+        public DateTime RecordedAt { get; set; }
+
+        public double AccelX { get; set; }
+        public double AccelY { get; set; }
+        public double AccelZ { get; set; }
+
+        public double GyroX { get; set; }
+        public double GyroY { get; set; }
+        public double GyroZ { get; set; }
+
+        public double PressureHpa { get; set; }
+        public double AltitudeM { get; set; }
+
+        public bool FallDetected { get; set; }
+        public bool LedActive { get; set; }
+        public bool BuzzerActive { get; set; }
+
+        public double MlFallScore { get; set; }
+        public bool MlTriggered { get; set; }
+
+        public double AccelMag
+        {
+            get
+            {
+                return Math.Sqrt(AccelX * AccelX + AccelY * AccelY + AccelZ * AccelZ);
+            }
+        }
+
+        public double GyroMag
+        {
+            get
+            {
+                return Math.Sqrt(GyroX * GyroX + GyroY * GyroY + GyroZ * GyroZ);
+            }
+        }
+
+        public string RecordedAtText
+        {
+            get
+            {
+                return RecordedAt.ToString("HH:mm:ss");
+            }
+        }
+    }
+}

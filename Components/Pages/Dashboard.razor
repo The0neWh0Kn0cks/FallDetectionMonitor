@@ -1,0 +1,1449 @@
+﻿@page "/"
+@page "/dashboard"
+@implements IDisposable
+@rendermode InteractiveServer
+
+@using FallDetectionMonitor.Data
+@using FallDetectionMonitor.Models
+@using Microsoft.EntityFrameworkCore
+@using Microsoft.JSInterop
+@using FallDetectionMonitor.Services
+
+@inject IDbContextFactory<FallDetectionDbContext> DbFactory
+@inject IJSRuntime JS
+@inject NavigationManager Navigation
+@inject MqttCommandPublisher CommandPublisher
+
+<audio id="alertSound" src="alert.mp3"></audio>
+
+@if (showPersonForm)
+{
+    <div class="form-overlay">
+        <div class="person-form-box">
+            <h2>@(isEditingPerson ? "Edit Client" : "Add Client")</h2>
+
+            <label>Name</label>
+            <input @bind="personForm.FullName" placeholder="Example: Mr Tan Ah Kow" />
+
+            <label>Age</label>
+            <input type="number" @bind="personForm.Age" />
+
+            <h3 class="form-section-title">Location</h3>
+
+            <label>Street Name and Number <span class="required-star">*</span></label>
+            <input @bind="personForm.StreetNameAndNumber" placeholder="Example: Tampines Avenue 3" />
+
+            <label>Block Number <span class="required-star">*</span></label>
+            <input @bind="personForm.BlockNumber" placeholder="Example: 456" />
+
+            <label>Postal Code <span class="required-star">*</span></label>
+            <input @bind="personForm.PostalCode" placeholder="Example: 520456" />
+
+            <label>Unit Number <span class="optional-text">(Optional)</span></label>
+            <input @bind="personForm.UnitNumber" placeholder="Example: #08-12" />
+
+            <label>Medical History</label>
+            <textarea @bind="personForm.MedicalHistory" placeholder="Example: High blood pressure, weak balance"></textarea>
+
+            <div class="checkbox-row">
+                <input id="noKinCheckbox" type="checkbox" @bind="personForm.HasNoNextOfKin" />
+                <label for="noKinCheckbox">No next-of-kin recorded</label>
+            </div>
+
+            @if (!personForm.HasNoNextOfKin)
+            {
+                <label>Next-of-Kin Name</label>
+                <input @bind="personForm.EmergencyContactName" placeholder="Example: John Tan" />
+
+                <label>Next-of-Kin Number</label>
+                <input @bind="personForm.EmergencyContactPhone" placeholder="Example: 91234567" />
+            }
+
+            <div class="form-actions">
+                <button @onclick="SavePerson">Save</button>
+                <button class="secondary-btn" @onclick="ClosePersonForm">Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="dashboard-page">
+    <header>
+        <h1>Smart Fall Detection Remote Monitoring</h1>
+        <p>Multiple elderly monitoring dashboard</p>
+    </header>
+
+    <main>
+        @if (!string.IsNullOrWhiteSpace(errorMessage))
+        {
+            <section class="error-box">
+                <strong>Error:</strong> @errorMessage
+            </section>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(actionMessage))
+        {
+            <section class="success-box">
+                @actionMessage
+            </section>
+        }
+
+        @if (isDetailsView && selectedPerson != null)
+        {
+            <section class="details-page">
+                <div class="details-top-row">
+                    <button @onclick="BackToHome">← Back to Client List</button>
+                </div>
+
+                <div class="detail-card @(selectedPerson.FallDetected ? "detail-danger" : "detail-normal")">
+                    <h2>Client Detail Page</h2>
+
+                    <div class="detail-main-grid">
+                        <p><strong>Name:</strong> @selectedPerson.Name</p>
+                        <p><strong>Age:</strong> @selectedPerson.Age</p>
+                        <p><strong>Location:</strong> @selectedPerson.Location</p>
+                        <p><strong>Medical History:</strong> @selectedPerson.MedicalHistory</p>
+
+                        <p><strong>LED Status:</strong> @(selectedPerson.LedActive ? "ON" : "OFF")</p>
+                        <p><strong>Buzzer Status:</strong> @(selectedPerson.BuzzerActive ? "ON" : "OFF")</p>
+
+                        <p><strong>Next-of-Kin:</strong> @selectedPerson.NextOfKinNameText</p>
+                        <p><strong>Next-of-Kin Number:</strong> @selectedPerson.NextOfKinNumberText</p>
+
+                        <p><strong>Fall Detected:</strong> @(selectedPerson.FallDetected ? "Yes" : "No")</p>
+                        <p><strong>Fall Detected Time:</strong> @selectedPerson.FallDetectedAtText</p>
+
+                        <p><strong>Emergency Services Called:</strong> @selectedPerson.EmergencyServicesCalledAtText</p>
+                        <p><strong>Next-of-Kin Called:</strong> @selectedPerson.NextOfKinCalledAtText</p>
+                    </div>
+
+                    <div class="detail-actions">
+                        <button class="call-btn" @onclick="CallEmergencyServices">
+                            Call Emergency Services
+                        </button>
+
+                        @if (selectedPerson.HasNextOfKin && !string.IsNullOrWhiteSpace(selectedPerson.NextOfKinNumber))
+                        {
+                            <button class="call-btn" @onclick="CallNextOfKin">
+                                Call Next-of-Kin
+                            </button>
+                        }
+
+                        <button @onclick="ResetSelected">
+                            Reset Selected
+                        </button>
+
+                        <button @onclick="EditSelectedPerson">
+                            Edit
+                        </button>
+
+                        <button class="danger-btn" @onclick="DeleteSelectedPerson">
+                            Delete
+                        </button>
+
+                        <button class="demo-btn" @onclick="SimulateSelectedFall">
+                            Simulate Fall
+                        </button>
+                    </div>
+                </div>
+            </section>
+        }
+        else
+        {
+            <section class="top-actions">
+                <button @onclick="OpenAddForm">Add Client</button>
+                <button @onclick="ResetAll">Reset All</button>
+                <button class="silent-btn" @onclick="SilenceAllAlarmSound">Silence All Alarm Sound</button>
+                <button @onclick="LoadDashboardData">Refresh Dashboard</button>
+            </section>
+
+            <section class="home-grid">
+                <div class="client-list-panel">
+                    <div class="panel-header">
+                        <div>
+                            <h2>Client Monitoring List</h2>
+                            <p>Click a row to open the client detail page.</p>
+                        </div>
+
+                        <input class="search-box" @bind="searchText" @bind:event="oninput" placeholder="Search client name..." />
+                    </div>
+
+                    <div class="client-table-scroll">
+                        <table class="client-table">
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Age</th>
+                                    <th>Status</th>
+                                    <th>Last Updated</th>
+                                    <th>Fall Detected Time</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+
+                            <tbody>
+                                @if (FilteredPeople.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="6" class="empty-table-text">No clients found.</td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var person in FilteredPeople)
+                                    {
+                                        <tr class="client-row @(person.FallDetected ? "fall-row alarm-flashing-row" : "")"
+                                            @onclick="() => GoToDetails(person.WearableDeviceId)">
+                                            <td>@person.Name</td>
+                                            <td>@person.Age</td>
+                                            <td>
+                                                <span class="@(person.FallDetected ? "danger-text" : "normal-text")">
+                                                    @(person.FallDetected ? "Fall Detected" : "Safe")
+                                                </span>
+                                            </td>
+                                            <td>@person.RecordedAtText</td>
+                                            <td>@person.FallDetectedAtText</td>
+                                            <td>
+                                                <div class="row-hover-actions">
+                                                    <button @onclick="() => OpenEditForm(person)" @onclick:stopPropagation="true">
+                                                        Edit
+                                                    </button>
+
+                                                    <button class="danger-btn-small" @onclick="async () => await DeletePerson(person)" @onclick:stopPropagation="true">
+                                                        Delete
+                                                    </button>
+
+                                                    <button class="demo-btn-small" @onclick="async () => await SimulateFallForPerson(person)" @onclick:stopPropagation="true">
+                                                        Simulate Fall
+                                                    </button>
+                                                </div>
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+
+                    <div class="last-fall-box">
+                        <h3>Last Fall Detected</h3>
+
+                        @if (lastFallPerson == null)
+                        {
+                            <p>No fall has been detected yet.</p>
+                        }
+                        else
+                        {
+                            <div class="last-fall-content" @onclick="async () => await GoToDetails(lastFallPerson.WearableDeviceId)">
+                                <div class="last-fall-grid">
+                                    <div class="last-fall-item">
+                                        <strong>Name</strong>
+                                        <p>@lastFallPerson.Name</p>
+                                    </div>
+
+                                    <div class="last-fall-item">
+                                        <strong>Age</strong>
+                                        <p>@lastFallPerson.Age</p>
+                                    </div>
+
+                                    <div class="last-fall-item">
+                                        <strong>Current Status</strong>
+                                        <p class="@(lastFallPerson.FallDetected ? "danger-text" : "normal-text")">
+                                            @(lastFallPerson.FallDetected ? "Fall Detected" : "Safe")
+                                        </p>
+                                    </div>
+
+                                    <div class="last-fall-item">
+                                        <strong>Last Updated</strong>
+                                        <p>@lastFallPerson.RecordedAtText</p>
+                                    </div>
+
+                                    <div class="last-fall-item">
+                                        <strong>Last Fall Time</strong>
+                                        <p>@lastFallPerson.FallDetectedAtText</p>
+                                    </div>
+
+                                    <div class="last-fall-item action-full">
+                                        <strong>Action Taken</strong>
+                                        <p>@lastFallPerson.ActionTakenText</p>
+                                    </div>
+
+                                    <div class="last-fall-item">
+                                        <strong>Device Code</strong>
+                                        <p>@lastFallPerson.DeviceCode</p>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <div class="alarm-panel">
+                    <h2>Alarms Ongoing</h2>
+
+                    <div class="alarm-scroll">
+                        @if (ActiveAlarms.Count == 0)
+                        {
+                            <p class="no-alarm-text">No active fall alarms.</p>
+                        }
+                        else
+                        {
+                            @foreach (var alarm in ActiveAlarms)
+                            {
+                                <div class="alarm-card alarm-flashing" @onclick="async () => await GoToDetails(alarm.WearableDeviceId)">
+                                    <h3>@alarm.Name</h3>
+                                    <p><strong>Age:</strong> @alarm.Age</p>
+                                    <p><strong>Time:</strong> @alarm.FallDetectedAtText</p>
+                                    <p><strong>Action:</strong> @alarm.ActionTakenText</p>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+    </main>
+</div>
+
+@code {
+    private List<DashboardPerson> people = new();
+    private DashboardPerson? selectedPerson;
+    private DashboardPerson? lastFallPerson;
+
+    private string searchText = "";
+    private string errorMessage = "";
+    private string actionMessage = "";
+
+    private bool isDetailsView = false;
+    private bool showPersonForm = false;
+    private bool isEditingPerson = false;
+
+    private PersonForm personForm = new();
+
+    private PeriodicTimer? refreshTimer;
+    private CancellationTokenSource? refreshCancellationTokenSource;
+
+    private bool alertSoundPlaying = false;
+    private bool silenceAllAlarmSound = false;
+    private bool isLoading = false;
+
+    private HashSet<int> mutedAlertIds = new();
+
+    private string lastMessageKey = "";
+
+    private static readonly Random random = new Random();
+
+    private List<DashboardPerson> FilteredPeople
+    {
+        get
+        {
+            if (string.IsNullOrWhiteSpace(searchText))
+            {
+                return people;
+            }
+
+            return people
+                .Where(p => p.Name.Contains(searchText, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+        }
+    }
+
+    private List<DashboardPerson> ActiveAlarms
+    {
+        get
+        {
+            return people
+                .Where(p => p.FallDetected)
+                .OrderBy(p => p.FallDetectedAt)
+                .ToList();
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDashboardData();
+
+        refreshCancellationTokenSource = new CancellationTokenSource();
+        refreshTimer = new PeriodicTimer(TimeSpan.FromSeconds(1));
+
+        _ = AutoRefreshDashboard();
+    }
+
+    private async Task AutoRefreshDashboard()
+    {
+        if (refreshTimer == null || refreshCancellationTokenSource == null)
+        {
+            return;
+        }
+
+        try
+        {
+            while (await refreshTimer.WaitForNextTickAsync(refreshCancellationTokenSource.Token))
+            {
+                await LoadDashboardData();
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // Normal when page is closed.
+        }
+    }
+
+    private async Task LoadDashboardData()
+    {
+        if (isLoading)
+        {
+            return;
+        }
+
+        isLoading = true;
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var devices = await db.WearableDevices
+                .Include(d => d.Patient)
+                .OrderBy(d => d.Id)
+                .ToListAsync();
+
+            var dashboardPeople = new List<DashboardPerson>();
+
+            foreach (var device in devices)
+            {
+                var latestReading = await db.SensorReadings
+                    .Where(r => r.WearableDeviceId == device.Id)
+                    .OrderByDescending(r => r.RecordedAt)
+                    .FirstOrDefaultAsync();
+
+                var activeAlert = await db.AlertEvents
+                    .Where(a => a.WearableDeviceId == device.Id && a.IsResolved == false)
+                    .OrderByDescending(a => a.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                var lastAlert = await db.AlertEvents
+                    .Where(a => a.WearableDeviceId == device.Id)
+                    .OrderByDescending(a => a.CreatedAt)
+                    .FirstOrDefaultAsync();
+
+                var latestFallReading = await db.SensorReadings
+                    .Where(r => r.WearableDeviceId == device.Id && r.FallDetected)
+                    .OrderByDescending(r => r.RecordedAt)
+                    .FirstOrDefaultAsync();
+
+                bool fallDetected = activeAlert != null || latestReading?.FallDetected == true;
+
+                DateTime? fallTime = activeAlert?.CreatedAt
+                    ?? latestFallReading?.RecordedAt
+                    ?? lastAlert?.CreatedAt;
+
+                dashboardPeople.Add(new DashboardPerson
+                {
+                    WearableDeviceId = device.Id,
+                    PatientId = device.PatientId,
+                    DeviceCode = device.DeviceCode,
+
+                    ActiveAlertId = activeAlert?.Id,
+                    Name = device.Patient?.FullName ?? "Unknown Client",
+                    Age = device.Patient?.Age ?? 0,
+                    Location = string.IsNullOrWhiteSpace(device.Patient?.Location) ? "Home" : device.Patient.Location,
+                    MedicalHistory = string.IsNullOrWhiteSpace(device.Patient?.MedicalHistory) ? "Medical history not recorded yet" : device.Patient.MedicalHistory,
+
+                    HasNextOfKin = device.Patient?.HasNextOfKin ?? true,
+                    NextOfKinName = device.Patient?.EmergencyContactName ?? "",
+                    NextOfKinNumber = device.Patient?.EmergencyContactPhone ?? "",
+
+                    PressureHpa = latestReading?.PressureHpa ?? 0,
+                    AltitudeM = latestReading?.AltitudeM ?? 0,
+
+                    AccelX = latestReading?.AccelX ?? 0,
+                    AccelY = latestReading?.AccelY ?? 0,
+                    AccelZ = latestReading?.AccelZ ?? 0,
+
+                    GyroX = latestReading?.GyroX ?? 0,
+                    GyroY = latestReading?.GyroY ?? 0,
+                    GyroZ = latestReading?.GyroZ ?? 0,
+
+                    FallDetected = fallDetected,
+                    LedActive = latestReading?.LedActive ?? false,
+                    BuzzerActive = latestReading?.BuzzerActive ?? false,
+
+                    RecordedAt = latestReading?.RecordedAt,
+                    FallDetectedAt = fallTime,
+
+                    EmergencyServicesCalledAt = activeAlert?.EmergencyServicesCalledAt ?? lastAlert?.EmergencyServicesCalledAt,
+                    NextOfKinCalledAt = activeAlert?.NextOfKinCalledAt ?? lastAlert?.NextOfKinCalledAt
+                });
+            }
+
+            people = dashboardPeople;
+
+            if (selectedPerson != null)
+            {
+                selectedPerson = people.FirstOrDefault(p => p.WearableDeviceId == selectedPerson.WearableDeviceId);
+            }
+
+            lastFallPerson = people
+                .Where(p => p.FallDetectedAt != null)
+                .OrderByDescending(p => p.FallDetectedAt)
+                .FirstOrDefault();
+
+            await HandleAlertSound();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+        finally
+        {
+            isLoading = false;
+        }
+    }
+
+    private async Task HandleAlertSound()
+    {
+        if (isDetailsView)
+        {
+            return;
+        }
+
+        if (silenceAllAlarmSound)
+        {
+            if (alertSoundPlaying)
+            {
+                await StopAlertSound();
+                alertSoundPlaying = false;
+            }
+
+            return;
+        }
+
+        var unmutedActiveAlarm = ActiveAlarms
+            .FirstOrDefault(a => a.ActiveAlertId == null || !mutedAlertIds.Contains(a.ActiveAlertId.Value));
+
+        if (unmutedActiveAlarm != null && !alertSoundPlaying)
+        {
+            await PlayAlertSound();
+            alertSoundPlaying = true;
+        }
+
+        if (unmutedActiveAlarm == null && alertSoundPlaying)
+        {
+            await StopAlertSound();
+            alertSoundPlaying = false;
+        }
+    }
+
+    private async Task SilenceAllAlarmSound()
+    {
+        silenceAllAlarmSound = true;
+        mutedAlertIds.Clear();
+
+        await StopAlertSound();
+        alertSoundPlaying = false;
+
+        actionMessage = "All alarm sounds silenced. Active alarms will continue flashing until resolved.";
+    }   
+
+    private async Task OpenDetails(int wearableDeviceId)
+    {
+        selectedPerson = people.FirstOrDefault(p => p.WearableDeviceId == wearableDeviceId);
+
+        if (selectedPerson?.ActiveAlertId != null)
+        {
+            mutedAlertIds.Add(selectedPerson.ActiveAlertId.Value);
+        }
+
+        isDetailsView = true;
+
+        await StopAlertSound();
+        alertSoundPlaying = false;
+    }
+
+    private async Task GoToDetails(int wearableDeviceId)
+    {
+        selectedPerson = people.FirstOrDefault(p => p.WearableDeviceId == wearableDeviceId);
+
+        if (selectedPerson?.ActiveAlertId != null)
+        {
+            mutedAlertIds.Add(selectedPerson.ActiveAlertId.Value);
+        }
+
+        await StopAlertSound();
+        alertSoundPlaying = false;
+
+        await JS.InvokeVoidAsync("eval", $"window.open('/client-details/{wearableDeviceId}', '_blank');");
+    }
+
+    private async Task BackToHome()
+    {
+        isDetailsView = false;
+        await LoadDashboardData();
+    }
+
+    private void OpenAddForm()
+    {
+        errorMessage = "";
+        actionMessage = "";
+        isEditingPerson = false;
+
+        personForm = new PersonForm
+        {
+            FullName = "",
+            Age = 75,
+            StreetNameAndNumber = "",
+            BlockNumber = "",
+            PostalCode = "",
+            UnitNumber = "",
+            MedicalHistory = "",
+            HasNoNextOfKin = false,
+            EmergencyContactName = "",
+            EmergencyContactPhone = ""
+        };
+
+        showPersonForm = true;
+    }
+
+    private void OpenEditForm(DashboardPerson person)
+    {
+        errorMessage = "";
+        actionMessage = "";
+        isEditingPerson = true;
+        selectedPerson = person;
+
+        var splitLocation = SplitLocation(person.Location);
+
+        personForm = new PersonForm
+        {
+            PatientId = person.PatientId,
+            WearableDeviceId = person.WearableDeviceId,
+            FullName = person.Name,
+            Age = person.Age,
+
+            StreetNameAndNumber = splitLocation.StreetNameAndNumber,
+            BlockNumber = splitLocation.BlockNumber,
+            PostalCode = splitLocation.PostalCode,
+            UnitNumber = splitLocation.UnitNumber,
+
+            MedicalHistory = person.MedicalHistory == "Medical history not recorded yet" ? "" : person.MedicalHistory,
+            HasNoNextOfKin = !person.HasNextOfKin,
+            EmergencyContactName = person.NextOfKinName,
+            EmergencyContactPhone = person.NextOfKinNumber
+        };
+
+        showPersonForm = true;
+    }
+
+    private void EditSelectedPerson()
+    {
+        if (selectedPerson == null)
+        {
+            actionMessage = "Select a client first.";
+            return;
+        }
+
+        OpenEditForm(selectedPerson);
+    }
+
+    private void ClosePersonForm()
+    {
+        showPersonForm = false;
+    }
+
+    private async Task SavePerson()
+    {
+        errorMessage = "";
+        actionMessage = "";
+
+        if (string.IsNullOrWhiteSpace(personForm.FullName))
+        {
+            errorMessage = "Name is required.";
+            return;
+        }
+
+        if (personForm.Age <= 0)
+        {
+            errorMessage = "Age must be more than 0.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(personForm.StreetNameAndNumber))
+        {
+            errorMessage = "Street name and number is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(personForm.BlockNumber))
+        {
+            errorMessage = "Block number is required.";
+            return;
+        }
+
+        if (string.IsNullOrWhiteSpace(personForm.PostalCode))
+        {
+            errorMessage = "Postal code is required.";
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            if (isEditingPerson)
+            {
+                var patient = await db.Patients
+                    .FirstOrDefaultAsync(p => p.Id == personForm.PatientId);
+
+                if (patient == null)
+                {
+                    errorMessage = "Client could not be found.";
+                    return;
+                }
+
+                patient.FullName = personForm.FullName;
+                patient.Age = personForm.Age;
+                patient.Location = BuildLocationText(personForm);
+                patient.MedicalHistory = string.IsNullOrWhiteSpace(personForm.MedicalHistory)
+                    ? "Medical history not recorded yet"
+                    : personForm.MedicalHistory;
+
+                patient.HasNextOfKin = !personForm.HasNoNextOfKin;
+
+                if (personForm.HasNoNextOfKin)
+                {
+                    patient.EmergencyContactName = "";
+                    patient.EmergencyContactPhone = "";
+                }
+                else
+                {
+                    patient.EmergencyContactName = personForm.EmergencyContactName;
+                    patient.EmergencyContactPhone = personForm.EmergencyContactPhone;
+                }
+
+                await db.SaveChangesAsync();
+                actionMessage = "Client updated successfully.";
+            }
+            else
+            {
+                int count = await db.Patients.CountAsync() + 1;
+
+                var patient = new Patient
+                {
+                    FullName = personForm.FullName,
+                    Age = personForm.Age,
+                    Location = BuildLocationText(personForm),
+                    MedicalHistory = string.IsNullOrWhiteSpace(personForm.MedicalHistory)
+                        ? "Medical history not recorded yet"
+                        : personForm.MedicalHistory,
+                    HasNextOfKin = !personForm.HasNoNextOfKin,
+                    EmergencyContactName = personForm.HasNoNextOfKin ? "" : personForm.EmergencyContactName,
+                    EmergencyContactPhone = personForm.HasNoNextOfKin ? "" : personForm.EmergencyContactPhone
+                };
+
+                db.Patients.Add(patient);
+                await db.SaveChangesAsync();
+
+                var device = new WearableDevice
+                {
+                    DeviceName = $"Fall Detection Watch {count}",
+                    DeviceCode = $"FDW{count:000}",
+                    PatientId = patient.Id
+                };
+
+                db.WearableDevices.Add(device);
+                await db.SaveChangesAsync();
+
+                db.SensorReadings.Add(CreateNormalReading(device.Id));
+                await db.SaveChangesAsync();
+
+                actionMessage = "Client added successfully.";
+            }
+
+            showPersonForm = false;
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task DeleteSelectedPerson()
+    {
+        if (selectedPerson == null)
+        {
+            actionMessage = "Select a client first.";
+            return;
+        }
+
+        await DeletePerson(selectedPerson);
+    }
+
+    private async Task DeletePerson(DashboardPerson person)
+    {
+        bool confirmDelete = await JS.InvokeAsync<bool>(
+            "confirm",
+            $"Delete {person.Name}? This will delete their device, readings, and alerts."
+        );
+
+        if (!confirmDelete)
+        {
+            return;
+        }
+
+        errorMessage = "";
+        actionMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var device = await db.WearableDevices
+                .FirstOrDefaultAsync(d => d.Id == person.WearableDeviceId);
+
+            if (device == null)
+            {
+                actionMessage = "Selected device could not be found.";
+                return;
+            }
+
+            var readings = await db.SensorReadings
+                .Where(r => r.WearableDeviceId == device.Id)
+                .ToListAsync();
+
+            var alerts = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == device.Id)
+                .ToListAsync();
+
+            db.SensorReadings.RemoveRange(readings);
+            db.AlertEvents.RemoveRange(alerts);
+            db.WearableDevices.Remove(device);
+
+            var patient = await db.Patients
+                .FirstOrDefaultAsync(p => p.Id == device.PatientId);
+
+            if (patient != null)
+            {
+                db.Patients.Remove(patient);
+            }
+
+            await db.SaveChangesAsync();
+
+            if (selectedPerson?.WearableDeviceId == person.WearableDeviceId)
+            {
+                selectedPerson = null;
+                isDetailsView = false;
+            }
+
+            actionMessage = "Client deleted successfully.";
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task SimulateSelectedFall()
+    {
+        if (selectedPerson == null)
+        {
+            actionMessage = "Select a client first.";
+            return;
+        }
+
+        errorMessage = "";
+        actionMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var reading = new SensorReading
+            {
+                WearableDeviceId = selectedPerson.WearableDeviceId,
+                RecordedAt = DateTime.Now,
+
+                HeartRateBpm = 0,
+                PressureHpa = 998,
+                AltitudeM = 6.5,
+
+                AccelX = 3.8,
+                AccelY = -6.2,
+                AccelZ = 14.8,
+
+                GyroX = 180,
+                GyroY = -95,
+                GyroZ = 60,
+
+                FallDetected = true,
+                LedActive = true,
+                BuzzerActive = true
+            };
+
+            db.SensorReadings.Add(reading);
+
+            var alert = new AlertEvent
+            {
+                WearableDeviceId = selectedPerson.WearableDeviceId,
+                CreatedAt = DateTime.Now,
+                AlertType = "Fall Detected",
+                Message = $"{selectedPerson.Name} has fallen!",
+                IsResolved = false
+            };
+
+            db.AlertEvents.Add(alert);
+
+            await db.SaveChangesAsync();
+
+            mutedAlertIds.Remove(alert.Id);
+
+            await LoadDashboardData();
+
+            selectedPerson = people.FirstOrDefault(p => p.WearableDeviceId == reading.WearableDeviceId);
+
+            actionMessage = "Fall simulation added.";
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task ResetSelected()
+    {
+        if (selectedPerson == null)
+        {
+            actionMessage = "Select a client first.";
+            return;
+        }
+
+        errorMessage = "";
+        actionMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            db.SensorReadings.Add(CreateNormalReading(selectedPerson.WearableDeviceId));
+
+            var activeAlerts = await db.AlertEvents
+                .Where(a => a.WearableDeviceId == selectedPerson.WearableDeviceId && a.IsResolved == false)
+                .ToListAsync();
+
+            bool hasNoActionTaken = activeAlerts.Any(a =>
+    a.EmergencyServicesCalledAt == null &&
+    a.NextOfKinCalledAt == null);
+
+            string resetReason = "";
+
+            if (hasNoActionTaken)
+            {
+                resetReason = await JS.InvokeAsync<string>(
+                    "prompt",
+                    "No emergency action has been recorded yet. Please enter the reason for resetting this alarm:"
+                );
+
+                if (string.IsNullOrWhiteSpace(resetReason))
+                {
+                    errorMessage = "Reset cancelled. A reason is required when resetting without action taken.";
+                    return;
+                }
+            }
+
+            foreach (var alert in activeAlerts)
+            {
+                alert.IsResolved = true;
+                alert.ResolvedAt = DateTime.Now;
+                alert.ResolutionType = "Reset";
+
+                if (alert.EmergencyServicesCalledAt == null &&
+                    alert.NextOfKinCalledAt == null)
+                {
+                    alert.ResetReason = resetReason.Trim();
+                }
+            }
+
+            await db.SaveChangesAsync();
+
+            if (selectedPerson != null && !string.IsNullOrWhiteSpace(selectedPerson.DeviceCode))
+            {
+                await CommandPublisher.SendResetAlarmCommandAsync(selectedPerson.DeviceCode);
+            }
+
+            actionMessage = "Selected client reset successfully.";
+
+            await StopAlertSound();
+            alertSoundPlaying = false;
+            silenceAllAlarmSound = false;
+
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task ResetAll()
+    {
+        errorMessage = "";
+        actionMessage = "";
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var devices = await db.WearableDevices.ToListAsync();
+
+            foreach (var device in devices)
+            {
+                db.SensorReadings.Add(CreateNormalReading(device.Id));
+            }
+
+            var activeAlerts = await db.AlertEvents
+                .Where(a => a.IsResolved == false)
+                .ToListAsync();
+
+            var activeDeviceIds = activeAlerts
+                .Select(a => a.WearableDeviceId)
+                .Distinct()
+                .ToList();
+
+            var activeDeviceCodes = await db.WearableDevices
+                .Where(d => activeDeviceIds.Contains(d.Id))
+                .Select(d => d.DeviceCode)
+                .ToListAsync();
+
+            foreach (var alert in activeAlerts)
+            {
+                alert.IsResolved = true;
+                alert.ResolvedAt = DateTime.Now;
+                alert.ResolutionType = "Reset";
+            }
+
+            await db.SaveChangesAsync();
+
+            foreach (var deviceCode in activeDeviceCodes)
+            {
+                if (!string.IsNullOrWhiteSpace(deviceCode))
+                {
+                    await CommandPublisher.SendResetAlarmCommandAsync(deviceCode);
+                }
+            }
+
+            mutedAlertIds.Clear();
+            actionMessage = "All clients reset successfully.";
+
+            await StopAlertSound();
+            alertSoundPlaying = false;
+            silenceAllAlarmSound = false;
+
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task CallEmergencyServices()
+    {
+        if (selectedPerson == null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var alert = await GetOrCreateActiveAlert(db, selectedPerson);
+
+            alert.EmergencyServicesCalledAt = DateTime.Now;
+
+            await db.SaveChangesAsync();
+
+            actionMessage = "Emergency services call recorded.";
+
+            await JS.InvokeVoidAsync("alert", "Emergency services call recorded.");
+
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task CallNextOfKin()
+    {
+        if (selectedPerson == null)
+        {
+            return;
+        }
+
+        if (!selectedPerson.HasNextOfKin || string.IsNullOrWhiteSpace(selectedPerson.NextOfKinNumber))
+        {
+            actionMessage = "No next-of-kin recorded.";
+            return;
+        }
+
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+
+            var alert = await GetOrCreateActiveAlert(db, selectedPerson);
+
+            alert.NextOfKinCalledAt = DateTime.Now;
+
+            await db.SaveChangesAsync();
+
+            actionMessage = "Next-of-kin call recorded.";
+
+            await JS.InvokeVoidAsync("alert", $"Next-of-kin call recorded for {selectedPerson.NextOfKinName}.");
+
+            await LoadDashboardData();
+        }
+        catch (Exception ex)
+        {
+            errorMessage = ex.Message;
+        }
+    }
+
+    private async Task SimulateFallForPerson(DashboardPerson person)
+    {
+        selectedPerson = person;
+        await SimulateSelectedFall();
+    }
+
+    private async Task<AlertEvent> GetOrCreateActiveAlert(FallDetectionDbContext db, DashboardPerson person)
+    {
+        var alert = await db.AlertEvents
+            .Where(a => a.WearableDeviceId == person.WearableDeviceId && a.IsResolved == false)
+            .OrderByDescending(a => a.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (alert != null)
+        {
+            return alert;
+        }
+
+        alert = new AlertEvent
+        {
+            WearableDeviceId = person.WearableDeviceId,
+            CreatedAt = DateTime.Now,
+            AlertType = "Action Recorded",
+            Message = $"Emergency action recorded for {person.Name}.",
+            IsResolved = false
+        };
+
+        db.AlertEvents.Add(alert);
+        await db.SaveChangesAsync();
+
+        return alert;
+    }
+
+    private SensorReading CreateNormalReading(int wearableDeviceId)
+    {
+        return new SensorReading
+        {
+            WearableDeviceId = wearableDeviceId,
+            RecordedAt = DateTime.Now,
+
+            HeartRateBpm = 0,
+            PressureHpa = random.Next(1008, 1015),
+            AltitudeM = Math.Round(7 + random.NextDouble() * 2, 2),
+
+            AccelX = Math.Round(random.NextDouble() * 0.4, 2),
+            AccelY = Math.Round(random.NextDouble() * 0.4, 2),
+            AccelZ = Math.Round(9.5 + random.NextDouble() * 0.6, 2),
+
+            GyroX = Math.Round(random.NextDouble() * 0.2, 2),
+            GyroY = Math.Round(random.NextDouble() * 0.2, 2),
+            GyroZ = Math.Round(random.NextDouble() * 0.2, 2),
+
+            FallDetected = false,
+            LedActive = false,
+            BuzzerActive = false
+        };
+    }
+
+    private async Task PlayAlertSound()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("eval", """
+                const sound = document.getElementById('alertSound');
+                if (sound) {
+                    sound.volume = 1;
+                    sound.currentTime = 0;
+                    sound.play().catch(() => {});
+                }
+            """);
+        }
+        catch
+        {
+            // Ignore browser sound restrictions.
+        }
+    }
+
+    private async Task StopAlertSound()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("eval", """
+                const sound = document.getElementById('alertSound');
+                if (sound) {
+                    sound.pause();
+                    sound.currentTime = 0;
+                }
+            """);
+        }
+        catch
+        {
+            // Ignore browser sound restrictions.
+        }
+    }
+
+    protected override Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (string.IsNullOrWhiteSpace(errorMessage) && string.IsNullOrWhiteSpace(actionMessage))
+        {
+            return Task.CompletedTask;
+        }
+
+        string currentMessageKey = $"{errorMessage}|{actionMessage}";
+
+        if (currentMessageKey == lastMessageKey)
+        {
+            return Task.CompletedTask;
+        }
+
+        lastMessageKey = currentMessageKey;
+
+        _ = ClearMessagesAfterDelay(currentMessageKey);
+
+        return Task.CompletedTask;
+    }
+
+    private async Task ClearMessagesAfterDelay(string messageKey)
+    {
+        await Task.Delay(7000);
+
+        if (lastMessageKey == messageKey)
+        {
+            errorMessage = "";
+            actionMessage = "";
+            lastMessageKey = "";
+
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    public void Dispose()
+    {
+        refreshCancellationTokenSource?.Cancel();
+        refreshTimer?.Dispose();
+        refreshCancellationTokenSource?.Dispose();
+    }
+
+    private string BuildLocationText(PersonForm form)
+    {
+        string location = $"Block {form.BlockNumber}, {form.StreetNameAndNumber}, Singapore {form.PostalCode}";
+
+        if (!string.IsNullOrWhiteSpace(form.UnitNumber))
+        {
+            location += $", {form.UnitNumber}";
+        }
+
+        return location;
+    }
+
+    private LocationParts SplitLocation(string location)
+    {
+        var result = new LocationParts();
+
+        if (string.IsNullOrWhiteSpace(location) || location == "Home")
+        {
+            return result;
+        }
+
+        // Expected format:
+        // Block 456, Tampines Avenue 3, Singapore 520456, #08-12
+        string[] parts = location.Split(',', StringSplitOptions.TrimEntries);
+
+        if (parts.Length >= 1)
+        {
+            result.BlockNumber = parts[0].Replace("Block", "", StringComparison.OrdinalIgnoreCase).Trim();
+        }
+
+        if (parts.Length >= 2)
+        {
+            result.StreetNameAndNumber = parts[1].Trim();
+        }
+
+        if (parts.Length >= 3)
+        {
+            result.PostalCode = parts[2].Replace("Singapore", "", StringComparison.OrdinalIgnoreCase).Trim();
+        }
+
+        if (parts.Length >= 4)
+        {
+            result.UnitNumber = parts[3].Trim();
+        }
+
+        return result;
+    }
+
+    private class LocationParts
+    {
+        public string StreetNameAndNumber { get; set; } = "";
+        public string BlockNumber { get; set; } = "";
+        public string PostalCode { get; set; } = "";
+        public string UnitNumber { get; set; } = "";
+    }
+
+    private class PersonForm
+    {
+        public int PatientId { get; set; }
+        public int WearableDeviceId { get; set; }
+
+        public string FullName { get; set; } = "";
+        public int Age { get; set; } = 75;
+
+        public string StreetNameAndNumber { get; set; } = "";
+        public string BlockNumber { get; set; } = "";
+        public string PostalCode { get; set; } = "";
+        public string UnitNumber { get; set; } = "";
+
+        public string MedicalHistory { get; set; } = "";
+
+        public bool HasNoNextOfKin { get; set; } = false;
+        public string EmergencyContactName { get; set; } = "";
+        public string EmergencyContactPhone { get; set; } = "";
+    }
+
+    private class DashboardPerson
+    {
+        public int WearableDeviceId { get; set; }
+        public int PatientId { get; set; }
+        public int? ActiveAlertId { get; set; }
+
+        public string DeviceCode { get; set; } = "";
+        public string Name { get; set; } = "";
+        public int Age { get; set; }
+        public string Location { get; set; } = "Home";
+        public string MedicalHistory { get; set; } = "Medical history not recorded yet";
+
+        public bool HasNextOfKin { get; set; } = true;
+        public string NextOfKinName { get; set; } = "";
+        public string NextOfKinNumber { get; set; } = "";
+
+        public double PressureHpa { get; set; }
+        public double AltitudeM { get; set; }
+
+        public double AccelX { get; set; }
+        public double AccelY { get; set; }
+        public double AccelZ { get; set; }
+
+        public double GyroX { get; set; }
+        public double GyroY { get; set; }
+        public double GyroZ { get; set; }
+
+        public bool FallDetected { get; set; }
+        public bool LedActive { get; set; }
+        public bool BuzzerActive { get; set; }
+
+        public DateTime? RecordedAt { get; set; }
+        public DateTime? FallDetectedAt { get; set; }
+
+        public DateTime? EmergencyServicesCalledAt { get; set; }
+        public DateTime? NextOfKinCalledAt { get; set; }
+
+        public string NextOfKinNameText
+        {
+            get
+            {
+                if (!HasNextOfKin || string.IsNullOrWhiteSpace(NextOfKinName))
+                {
+                    return "Not recorded yet";
+                }
+
+                return NextOfKinName;
+            }
+        }
+
+        public string NextOfKinNumberText
+        {
+            get
+            {
+                if (!HasNextOfKin || string.IsNullOrWhiteSpace(NextOfKinNumber))
+                {
+                    return "Not recorded yet";
+                }
+
+                return NextOfKinNumber;
+            }
+        }
+
+        public string RecordedAtText
+        {
+            get
+            {
+                return RecordedAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "--";
+            }
+        }
+
+        public string FallDetectedAtText
+        {
+            get
+            {
+                return FallDetectedAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "--";
+            }
+        }
+
+        public string EmergencyServicesCalledAtText
+        {
+            get
+            {
+                return EmergencyServicesCalledAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "Not recorded yet";
+            }
+        }
+
+        public string NextOfKinCalledAtText
+        {
+            get
+            {
+                return NextOfKinCalledAt?.ToString("dd/MM/yyyy hh:mm:ss tt") ?? "Not recorded yet";
+            }
+        }
+
+        public string ActionTakenText
+        {
+            get
+            {
+                bool emergencyCalled = EmergencyServicesCalledAt != null;
+                bool nextOfKinCalled = NextOfKinCalledAt != null;
+
+                if (emergencyCalled && nextOfKinCalled)
+                {
+                    return $"Emergency called at {EmergencyServicesCalledAtText}; Next-of-kin called at {NextOfKinCalledAtText}";
+                }
+
+                if (emergencyCalled)
+                {
+                    return $"Emergency called at {EmergencyServicesCalledAtText}";
+                }
+
+                if (nextOfKinCalled)
+                {
+                    return $"Next-of-kin called at {NextOfKinCalledAtText}";
+                }
+
+                return "No action recorded yet";
+            }
+        }
+    }
+}

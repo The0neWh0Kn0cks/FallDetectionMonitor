@@ -1,0 +1,156 @@
+﻿.sensor-graph-page {
+    padding: 24px;
+    background: #f5f7fb;
+    min-height: 100vh;
+}
+
+.graph-header {
+    background: #102a43;
+    color: white;
+    padding: 20px;
+    border-radius: 14px;
+    margin-bottom: 18px;
+}
+
+    .graph-header h1 {
+        margin: 0;
+        font-size: 30px;
+    }
+
+    .graph-header p {
+        margin: 6px 0 0 0;
+    }
+
+.graph-subtitle {
+    opacity: 0.85;
+}
+
+.graph-actions {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 18px;
+}
+
+    .graph-actions button {
+        border: none;
+        background: #2563eb;
+        color: white;
+        padding: 10px 16px;
+        border-radius: 10px;
+        font-weight: 700;
+        cursor: pointer;
+    }
+
+.info-box,
+.error-box {
+    padding: 14px;
+    border-radius: 10px;
+    margin-bottom: 16px;
+}
+
+.info-box {
+    background: #e0f2fe;
+    color: #075985;
+}
+
+.error-box {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.latest-reading-card,
+.chart-card,
+.readings-table-card {
+    background: white;
+    border-radius: 14px;
+    padding: 18px;
+    margin-bottom: 18px;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
+}
+
+.latest-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 14px;
+}
+
+    .latest-grid div {
+        background: #f8fafc;
+        padding: 12px;
+        border-radius: 10px;
+    }
+
+    .latest-grid strong {
+        display: block;
+        color: #475569;
+        margin-bottom: 5px;
+    }
+
+    .latest-grid p {
+        margin: 0;
+        font-size: 18px;
+        font-weight: 700;
+    }
+
+.safe-text {
+    color: #15803d;
+}
+
+.danger-text {
+    color: #dc2626;
+}
+
+.chart-card {
+    min-height: 460px;
+    height: auto;
+    margin-bottom: 28px;
+    overflow: hidden;
+}
+
+    .chart-card h2 {
+        margin-bottom: 6px;
+    }
+
+.chart-note {
+    margin-top: 0;
+    margin-bottom: 16px;
+    color: #64748b;
+    font-size: 14px;
+}
+
+.chart-card canvas {
+    display: block;
+    width: 100% !important;
+    height: 320px !important;
+    max-height: 320px !important;
+}
+
+.readings-scroll {
+    max-height: 430px;
+    overflow: auto;
+    border: 1px solid #e2e8f0;
+    border-radius: 12px;
+}
+
+.readings-table-card table {
+    width: 100%;
+    min-width: 1200px;
+    border-collapse: collapse;
+}
+
+.readings-table-card th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+}
+    
+.readings-table-card td {
+    padding: 10px;
+    border-bottom: 1px solid #e2e8f0;
+    text-align: left;
+    white-space: nowrap;
+}
+
+.readings-table-card th {
+    background: #f1f5f9;
+}
