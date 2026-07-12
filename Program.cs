@@ -7,7 +7,9 @@ var builder = WebApplication.CreateBuilder(args);
 
 // Database factory for Blazor Server components
 builder.Services.AddDbContextFactory<FallDetectionDbContext>(options =>
-    options.UseSqlServer(builder.Configuration.GetConnectionString("FallDetectionConnection")));
+    options.UseSqlServer(
+        builder.Configuration.GetConnectionString("FallDetectionConnection"),
+        sqlOptions => sqlOptions.EnableRetryOnFailure()));
 builder.Services.AddHostedService<MqttFallAlertService>();
 builder.Services.AddScoped<MqttCommandPublisher>();
 
@@ -35,4 +37,4 @@ app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
-app.Run();
+app.Run();  

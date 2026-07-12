@@ -49,12 +49,26 @@
                 datasets: datasets.map((dataset) => {
                     const lower = dataset.label.toLowerCase();
 
-                    let color = "#111827";
+                    let color = "#111827"; // default black
 
-                    if (lower.includes(" x")) color = "#dc2626";      // red
-                    else if (lower.includes(" y")) color = "#16a34a"; // green
-                    else if (lower.includes(" z")) color = "#2563eb"; // blue
-                    else if (lower.includes("mag")) color = "#f97316"; // orange
+                    if (lower.includes(" x")) {
+                        color = "#2563eb"; // X = blue
+                    }
+                    else if (lower.includes(" y")) {
+                        color = "#dc2626"; // Y = red
+                    }
+                    else if (lower.includes(" z")) {
+                        color = "#eab308"; // Z = yellow
+                    }
+                    else if (lower.includes("mag")) {
+                        color = "#111827"; // magnitude = black
+                    }
+                    else if (lower.includes("pressure")) {
+                        color = "#2563eb"; // pressure = blue
+                    }
+                    else if (lower.includes("altitude")) {
+                        color = "#dc2626"; // altitude = red
+                    }
 
                     return {
                         label: dataset.label,
