@@ -432,7 +432,7 @@
                     .OrderByDescending(r => r.RecordedAt)
                     .FirstOrDefaultAsync();
 
-                bool fallDetected = activeAlert != null || latestReading?.FallDetected == true;
+                bool fallDetected = activeAlert != null;
 
                 DateTime? fallTime = activeAlert?.CreatedAt
                     ?? latestFallReading?.RecordedAt

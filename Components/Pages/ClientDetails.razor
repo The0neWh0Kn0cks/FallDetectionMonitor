@@ -387,7 +387,7 @@
 
             BuildFallCountChart();
 
-            bool fallDetected = activeFallAlert != null || latestReading?.FallDetected == true;
+            bool fallDetected = activeFallAlert != null;
 
             DateTime? fallTime = activeFallAlert?.CreatedAt
                 ?? latestFallReading?.RecordedAt

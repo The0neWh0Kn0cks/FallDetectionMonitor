@@ -37,7 +37,20 @@ namespace FallDetectionMonitor.Services
                 string topic = args.ApplicationMessage.Topic;
                 string payload = args.ApplicationMessage.ConvertPayloadToString();
 
-                _logger.LogInformation("MQTT message received. Topic: {Topic}, Payload: {Payload}", topic, payload);
+                if (args.ApplicationMessage.Retain)
+                {
+                    _logger.LogWarning(
+                        "Ignored retained MQTT message. Topic: {Topic}, Payload: {Payload}",
+                        topic,
+                        payload);
+
+                    return;
+                }
+
+                _logger.LogInformation(
+                    "MQTT message received. Topic: {Topic}, Payload: {Payload}",
+                    topic,
+                    payload);
 
                 await HandleMqttMessageAsync(topic, payload, stoppingToken);
             };
@@ -159,6 +172,20 @@ namespace FallDetectionMonitor.Services
             MqttDeviceMessage message,
             CancellationToken cancellationToken)
         {
+            var existingActiveAlert = await db.AlertEvents.AnyAsync(
+        a => a.WearableDeviceId == wearableDeviceId &&
+             a.IsResolved == false &&
+             a.AlertType == "Fall Detected",
+        cancellationToken);
+
+            if (existingActiveAlert)
+            {
+                _logger.LogInformation(
+                    "Ignored duplicate fall alert for device ID {WearableDeviceId}",
+                    wearableDeviceId);
+
+                return;
+            }
             var reading = new SensorReading
             {
                 WearableDeviceId = wearableDeviceId,
