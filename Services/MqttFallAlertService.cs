@@ -37,13 +37,11 @@ namespace FallDetectionMonitor.Services
                 string topic = args.ApplicationMessage.Topic;
                 string payload = args.ApplicationMessage.ConvertPayloadToString();
 
+                _logger.LogWarning( "MQTT RECEIVED: Retain={Retain}, Topic={Topic}, Payload={Payload}",args.ApplicationMessage.Retain,topic,    payload);
+
                 if (args.ApplicationMessage.Retain)
                 {
-                    _logger.LogWarning(
-                        "Ignored retained MQTT message. Topic: {Topic}, Payload: {Payload}",
-                        topic,
-                        payload);
-
+                    _logger.LogWarning("Ignored retained MQTT message.");
                     return;
                 }
 

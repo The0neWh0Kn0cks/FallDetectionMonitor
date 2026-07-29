@@ -7,7 +7,7 @@
             return;
         }
 
-        this.renderLineChart("accChart", "Accelerometer", data.labels, [
+        this.renderLineChart("accelChart", "Accelerometer", data.labels, [
             { label: "Accel X", data: data.accelX },
             { label: "Accel Y", data: data.accelY },
             { label: "Accel Z", data: data.accelZ },
